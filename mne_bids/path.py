@@ -11,6 +11,7 @@ import re
 import shutil as sh
 from copy import deepcopy
 from datetime import datetime
+from functools import lru_cache
 from io import StringIO
 from os import path as op
 from pathlib import Path
@@ -2327,50 +2328,23 @@ def _path_to_str(var):
         return str(var)
 
 
-def _filter_fnames(
-    fnames,
-    *,
-    subject=None,
-    session=None,
-    task=None,
-    acquisition=None,
-    run=None,
-    processing=None,
-    recording=None,
-    space=None,
-    split=None,
-    description=None,
-    suffix=None,
-    extension=None,
-    tracking_system=None,
+@lru_cache(maxsize=256)
+def _compile_entity_filter(
+    subject,
+    session,
+    task,
+    acquisition,
+    run,
+    processing,
+    recording,
+    space,
+    split,
+    description,
+    suffix,
+    extension,
+    tracking_system,
 ):
-    """Filter a list of BIDS filenames / paths based on BIDS entity values.
-
-    Input can be str or list of str.
-
-    Parameters
-    ----------
-    fnames : iterable of pathlib.Path | iterable of str
-
-    Returns
-    -------
-    list of pathlib.Path
-
-    """
-    subject = _ensure_tuple(subject)
-    session = _ensure_tuple(session)
-    task = _ensure_tuple(task)
-    acquisition = _ensure_tuple(acquisition)
-    run = _ensure_tuple(run)
-    processing = _ensure_tuple(processing)
-    space = _ensure_tuple(space)
-    recording = _ensure_tuple(recording)
-    split = _ensure_tuple(split)
-    description = _ensure_tuple(description)
-    suffix = _ensure_tuple(suffix)
-    extension = _ensure_tuple(extension)
-    tracking_system = _ensure_tuple(tracking_system)
-
+    """Return a compiled regex pattern for filtering BIDS filenames."""
     leading_path_str = r".*\/?"  # nothing or something ending with a `/`
     sub_str = r"sub-(" + "|".join(subject) + ")" if subject else r"sub-([^_]+)"
     ses_str = r"_ses-(" + "|".join(session) + ")" if session else r"(|_ses-([^_]+))"
@@ -2417,13 +2391,70 @@ def _filter_fnames(
         + tracksys_str
     )
 
-    # Convert to str so we can apply the regexp ...
-    fnames = [str(f) for f in fnames]
+    return re.compile(regexp)
 
-    # https://stackoverflow.com/a/51246151/1944216
-    fnames_filtered = sorted(filter(re.compile(regexp).match, fnames))
 
-    # ... and return Paths.
+def _filter_fnames(
+    fnames,
+    *,
+    subject=None,
+    session=None,
+    task=None,
+    acquisition=None,
+    run=None,
+    processing=None,
+    recording=None,
+    space=None,
+    split=None,
+    description=None,
+    suffix=None,
+    extension=None,
+    tracking_system=None,
+):
+    """Filter a list of BIDS filenames / paths based on BIDS entity values.
+
+    Input can be str or list of str.
+
+    Parameters
+    ----------
+    fnames : iterable of pathlib.Path | iterable of str
+
+    Returns
+    -------
+    list of pathlib.Path
+
+    """
+    subject = _ensure_tuple(subject)
+    session = _ensure_tuple(session)
+    task = _ensure_tuple(task)
+    acquisition = _ensure_tuple(acquisition)
+    run = _ensure_tuple(run)
+    processing = _ensure_tuple(processing)
+    space = _ensure_tuple(space)
+    recording = _ensure_tuple(recording)
+    split = _ensure_tuple(split)
+    description = _ensure_tuple(description)
+    suffix = _ensure_tuple(suffix)
+    extension = _ensure_tuple(extension)
+    tracking_system = _ensure_tuple(tracking_system)
+
+    matcher = _compile_entity_filter(
+        subject,
+        session,
+        task,
+        acquisition,
+        run,
+        processing,
+        recording,
+        space,
+        split,
+        description,
+        suffix,
+        extension,
+        tracking_system,
+    ).match
+
+    fnames_filtered = sorted(filter(matcher, map(os.fspath, fnames)))
     fnames_filtered = [Path(f) for f in fnames_filtered]
     return fnames_filtered
 
