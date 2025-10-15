@@ -8,6 +8,8 @@ from copy import deepcopy
 
 import numpy as np
 
+from mne_bids._fileio import _open_lock, _path_is_locked
+
 
 def _combine_rows(data1, data2, drop_column=None):
     """Add two OrderedDict's together and optionally drop repeated data.
@@ -182,12 +184,12 @@ def _to_tsv(data, fname):
         Ordered dictionary containing data to be written to a tsv file.
     fname : str
         Path to the file being written.
-
     """
     n_rows = len(data[list(data.keys())[0]])
     output = _tsv_to_str(data, n_rows)
 
-    with open(fname, "w", encoding="utf-8-sig") as f:
+    file_opener = open if _path_is_locked(fname) else _open_lock
+    with file_opener(fname, "w", encoding="utf-8-sig") as f:
         f.write(output)
         f.write("\n")
 

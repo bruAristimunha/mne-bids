@@ -16,6 +16,7 @@ from mne.io.kit.kit import get_kit_info
 from mne.utils import logger, verbose
 from mne.utils import warn as _warn
 
+from mne_bids._fileio import _open_lock
 from mne_bids.tsv_handler import _to_tsv
 
 # This regex matches key-val pairs. Any characters are allowed in the key and
@@ -234,7 +235,7 @@ def _write_json(fname, dictionary, overwrite=False):
         )
 
     json_output = json.dumps(dictionary, indent=4, ensure_ascii=False)
-    with open(fname, "w", encoding="utf-8") as fid:
+    with _open_lock(fname, "w", encoding="utf-8") as fid:
         fid.write(json_output)
         fid.write("\n")
 
@@ -254,13 +255,28 @@ def _write_tsv(fname, dictionary, overwrite=False, verbose=None):
     logger.info(f"Writing '{fname}'...")
 
 
+def _write_tsv_locked(fname: Path | str, data) -> None:
+    """Write TSV data while the caller holds the file lock."""
+    fname = Path(fname)
+    columns = list(data.keys())
+    n_rows = len(data[columns[0]]) if columns else 0
+    lines = ["\t".join(columns)]
+    for row_idx in range(n_rows):
+        lines.append("\t".join(str(data[col][row_idx]) for col in columns))
+
+    fname.parent.mkdir(parents=True, exist_ok=True)
+    with open(fname, "w", encoding="utf-8-sig") as fid:
+        fid.write("\n".join(lines))
+        fid.write("\n")
+
+
 def _write_text(fname, text, overwrite=False):
     """Write text to a file."""
     if fname.exists() and not overwrite:
         raise FileExistsError(
             f'"{fname}" already exists. Please set overwrite to True.'
         )
-    with open(fname, "w", encoding="utf-8-sig") as fid:
+    with _open_lock(fname, "w", encoding="utf-8-sig") as fid:
         fid.write(text)
         fid.write("\n")
 
@@ -535,7 +551,7 @@ def _example_sorter(filename):
     function is defined here (instead of in `conf.py`) because it must be *importable*
     in order for the sphinx gallery config dict in `conf.py` to remain serializable.
     """
-    with open(Path(__file__).parents[1] / "doc" / "example_order.json") as fid:
+    with _open_lock(Path(__file__).parents[1] / "doc" / "example_order.json") as fid:
         EXAMPLE_ORDER = json.load(fid)
 
     if filename not in EXAMPLE_ORDER:
