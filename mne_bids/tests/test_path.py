@@ -29,6 +29,7 @@ from mne_bids import (
 )
 from mne_bids.config import ALLOWED_PATH_ENTITIES_SHORT
 from mne_bids.path import (
+    _compile_entity_filter,
     _filter_fnames,
     _find_best_candidates,
     _parse_ext,
@@ -1104,6 +1105,43 @@ def test_filter_fnames(entities, expected_n_matches):
 
     output = _filter_fnames(fnames, **entities)
     assert len(output) == expected_n_matches
+
+
+def test_compile_entity_filter_cache():
+    """Repeated regex compilations reuse the cached pattern."""
+    cached = _compile_entity_filter(
+        ("01",),
+        tuple(),
+        tuple(),
+        tuple(),
+        tuple(),
+        tuple(),
+        tuple(),
+        tuple(),
+        tuple(),
+        tuple(),
+        ("meg",),
+        (".fif",),
+        tuple(),
+    )
+
+    cached_again = _compile_entity_filter(
+        ("01",),
+        tuple(),
+        tuple(),
+        tuple(),
+        tuple(),
+        tuple(),
+        tuple(),
+        tuple(),
+        tuple(),
+        tuple(),
+        ("meg",),
+        (".fif",),
+        tuple(),
+    )
+
+    assert cached is cached_again
 
 
 @testing.requires_testing_data
