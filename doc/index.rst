@@ -74,3 +74,4 @@ data type you used:
    API<api>
    CLI<generated/cli>
    Contribute<contribute>
+   Performance notes<find_matching_paths_performance>
