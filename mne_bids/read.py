@@ -97,7 +97,22 @@ def _read_raw(
                 f"this format."
             )
         raw_path = Path(raw_path)
-        raw = reader[ext](raw_path, verbose=verbose, **kwargs)
+        try:
+            raw = reader[ext](raw_path, verbose=verbose, **kwargs)
+        except TypeError as exc:
+            if ext == ".set" and "buffer is too small" in str(exc):
+                warn(
+                    "EEGLAB character encoding error detected. "
+                    'Retrying with uint16_codec="latin-1".'
+                )
+                raw = reader[ext](
+                    raw_path,
+                    verbose=verbose,
+                    uint16_codec="latin-1",
+                    **kwargs,
+                )
+            else:
+                raise
 
     # NWB is allowed, but not yet implemented
     elif ext == ".nwb":
