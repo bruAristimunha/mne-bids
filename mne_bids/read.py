@@ -640,9 +640,9 @@ def events_file_to_annotation_kwargs(events_fname: str | Path, *, verbose=None) 
     logger.info(f"Reading events from {events_fname}.")
     events_dict = _from_tsv(events_fname)
 
-    # drop events where onset is n/a; we can't annotate them and thus don't need entries
-    # for them in event_id either
-    events_dict = _drop(events_dict, "n/a", "onset")
+    # drop events where onset is n/a or NaN; we can't annotate them and thus don't need
+    # entries for them in event_id either. "nan"/"NaN" values are common in EEGLAB exports.
+    events_dict = _drop(events_dict, ["n/a", "nan", "NaN", ""], "onset")
 
     # Get event descriptions. Use `trial_type` column if available.
     if "trial_type" in events_dict:

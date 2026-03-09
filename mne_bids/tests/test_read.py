@@ -2036,3 +2036,18 @@ def test_events_file_to_annotation_kwargs(tmp_path):
         np.sort(np.unique(ev_kwargs_default["description"])),
         np.sort(dext_f["value"].unique()),
     )
+
+    # ---------------- filtering out NaN onset values (EEGLAB exports) ------
+    dext2 = df.copy()
+    dext2 = dext2.assign(
+        value=dext2.trial_type.map({"start_experiment": 1, "show_stimulus": 2}),
+        duration=1.0,
+    )
+    # Set some onsets to "nan" (as EEGLAB exports produce)
+    dext2.loc[0, "onset"] = "nan"
+    dext2.loc[1, "onset"] = "NaN"
+    dext2.to_csv(tmp_tsv_file, sep="\t", index=False)
+
+    ev_kwargs_nan = events_file_to_annotation_kwargs(events_fname=tmp_tsv_file)
+    # The two rows with nan/NaN onsets should have been dropped
+    assert len(ev_kwargs_nan["onset"]) == len(dext2) - 2
