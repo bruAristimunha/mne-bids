@@ -147,9 +147,28 @@ def _from_tsv(fname, dtypes=None):
     """
     from .utils import warn  # avoid circular import
 
-    data = np.loadtxt(
-        fname, dtype=str, delimiter="\t", ndmin=2, comments=None, encoding="utf-8-sig"
-    )
+    try:
+        data = np.loadtxt(
+            fname,
+            dtype=str,
+            delimiter="\t",
+            ndmin=2,
+            comments=None,
+            encoding="utf-8-sig",
+        )
+    except UnicodeDecodeError:
+        warn(
+            f"TSV file {fname} is not UTF-8 encoded. "
+            f"Falling back to latin-1 encoding."
+        )
+        data = np.loadtxt(
+            fname,
+            dtype=str,
+            delimiter="\t",
+            ndmin=2,
+            comments=None,
+            encoding="latin-1",
+        )
     # Handle empty files - data may be empty or only have a header
     if data.size == 0:
         warn(f"TSV file is empty: '{fname}'")
