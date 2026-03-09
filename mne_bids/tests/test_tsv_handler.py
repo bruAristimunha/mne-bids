@@ -119,3 +119,15 @@ def test_drop_different_types():
     result = _drop(data, values=values_to_drop, column=column)
     for value in values_to_drop:
         assert value not in result
+
+
+def test_from_tsv_latin1_fallback(tmp_path):
+    """Test that _from_tsv falls back to latin-1 for non-UTF-8 files."""
+    # Write a TSV with a latin-1 encoded micro-sign (µ = 0xB5)
+    tsv_path = tmp_path / "channels.tsv"
+    tsv_path.write_bytes(b"name\tunits\nEEG1\t\xb5V\n")
+
+    with pytest.warns(RuntimeWarning, match="not UTF-8 encoded"):
+        d = _from_tsv(tsv_path)
+    assert d["name"] == ["EEG1"]
+    assert "V" in d["units"][0]  # µV after decoding
