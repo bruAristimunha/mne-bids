@@ -1142,8 +1142,11 @@ def read_raw_bids(
         del extra_params["exclude"]
         logger.info('"exclude" parameter is not supported by read_raw_bids')
 
-    if raw_path.suffix == ".fif" and "allow_maxshield" not in extra_params:
-        extra_params["allow_maxshield"] = True
+    if raw_path.suffix == ".fif":
+        if "allow_maxshield" not in extra_params:
+            extra_params["allow_maxshield"] = True
+        if "on_split_missing" not in extra_params:
+            extra_params["on_split_missing"] = "warn"
     raw = _read_raw(
         raw_path,
         electrode=None,
