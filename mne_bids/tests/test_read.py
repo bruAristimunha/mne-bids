@@ -2036,3 +2036,159 @@ def test_events_file_to_annotation_kwargs(tmp_path):
         np.sort(np.unique(ev_kwargs_default["description"])),
         np.sort(dext_f["value"].unique()),
     )
+
+    # ---------------- HED column separated from extras ----------------------
+    df_hed = df.copy()
+    df_hed["HED"] = ["Experiment-structure", "Sensory-event, Visual-presentation"]
+    df_hed.to_csv(tmp_tsv_file, sep="\t", index=False)
+
+    ev_kwargs_hed = events_file_to_annotation_kwargs(events_fname=tmp_tsv_file)
+    assert ev_kwargs_hed["hed_strings"] == [
+        "Experiment-structure",
+        "Sensory-event, Visual-presentation",
+    ]
+    if ev_kwargs_hed["extras"] is not None:
+        for extra in ev_kwargs_hed["extras"]:
+            assert "HED" not in extra
+
+
+def test_handle_events_reading_hed(tmp_path):
+    """Test HEDAnnotations creation, n/a fallback, and default version."""
+    if not hasattr(mne, "HEDAnnotations"):
+        pytest.skip("HEDAnnotations requires a recent MNE-Python version")
+
+    from mne_bids.read import _DEFAULT_HED_VERSION
+
+    # Copy tiny_bids and add HED column to its events.tsv
+    bids_root = tmp_path / "tiny_bids"
+    sh.copytree(tiny_bids_root, bids_root)
+    events_tsv = (
+        bids_root / "sub-01" / "ses-eeg" / "eeg" / "sub-01_ses-eeg_task-rest_events.tsv"
+    )
+    df = pd.read_csv(events_tsv, sep="\t")
+    hed_tags = ["Experiment-structure", "Sensory-event, Visual-presentation"]
+    df["HED"] = hed_tags
+    df.to_csv(events_tsv, sep="\t", index=False)
+
+    # Fixture already has HEDVersion in dataset_description.json
+
+    # Create a minimal raw matching the events
+    info = mne.create_info(ch_names=["EEG1"], sfreq=5000.0, ch_types=["eeg"])
+    raw = mne.io.RawArray(np.zeros((1, 10000)), info)
+
+    # --- Happy path: HEDAnnotations created with correct version -----------
+    raw_hed, _ = _handle_events_reading(events_tsv, raw.copy(), bids_root=bids_root)
+    assert isinstance(raw_hed.annotations, mne.HEDAnnotations)
+    assert list(raw_hed.annotations.hed_string) == hed_tags
+    assert raw_hed.annotations._hed_version == "8.3.0"
+
+    # --- Default version when HEDVersion missing from description ----------
+    desc_path = bids_root / "dataset_description.json"
+    desc = json.loads(desc_path.read_text())
+    desc.pop("HEDVersion")
+    desc_path.write_text(json.dumps(desc))
+    raw_def, _ = _handle_events_reading(events_tsv, raw.copy(), bids_root=bids_root)
+    assert isinstance(raw_def.annotations, mne.HEDAnnotations)
+    assert raw_def.annotations._hed_version == _DEFAULT_HED_VERSION
+
+    # --- Fallback to regular Annotations when HED has n/a ------------------
+    df.loc[0, "HED"] = "n/a"
+    df.to_csv(events_tsv, sep="\t", index=False)
+    with pytest.warns(RuntimeWarning, match="n/a"):
+        raw_na, _ = _handle_events_reading(events_tsv, raw.copy(), bids_root=bids_root)
+    assert not isinstance(raw_na.annotations, mne.HEDAnnotations)
+
+
+def test_assemble_hed_from_sidecar(tmp_path):
+    """Test HED assembly from JSON sidecar column annotations."""
+    from mne_bids.read import _assemble_hed_from_sidecar
+    from mne_bids.tsv_handler import _drop, _from_tsv
+
+    # Create events.tsv with columns that map to sidecar HED
+    tsv_file = tmp_path / "events.tsv"
+    pd.DataFrame(
+        {
+            "onset": [0.0, 1.0, 2.0],
+            "duration": [0.0, 0.0, 0.0],
+            "trial_type": ["show_face", "left_press", "show_face"],
+            "value": [1, 2, 1],
+            "sample": [0, 100, 200],
+            "face_type": ["famous_face", "n/a", "unfamiliar_face"],
+            "rep_lag": [0, "n/a", 5],
+        }
+    ).to_csv(tsv_file, sep="\t", index=False)
+
+    # Create events.json sidecar with HED annotations (ds003645-style)
+    json_file = tmp_path / "events.json"
+    json_file.write_text(
+        json.dumps(
+            {
+                "trial_type": {
+                    "HED": {
+                        "show_face": "Sensory-event",
+                        "left_press": "Agent-action",
+                    }
+                },
+                "face_type": {
+                    "HED": {
+                        "famous_face": "Def/Famous-face-cond",
+                        "unfamiliar_face": "Def/Unfamiliar-face-cond",
+                    }
+                },
+                "rep_lag": {"HED": "Item-interval/#"},
+            }
+        )
+    )
+
+    events_dict = _from_tsv(tsv_file)
+    events_dict = _drop(events_dict, "n/a", "onset")
+    result = _assemble_hed_from_sidecar(events_dict, json_file)
+
+    assert result is not None
+    assert len(result) == 3
+    # Row 0: show_face + famous_face + rep_lag=0
+    assert "Sensory-event" in result[0]
+    assert "Def/Famous-face-cond" in result[0]
+    assert "Item-interval/0" in result[0]
+    # Row 1: left_press, face_type=n/a (skipped), rep_lag=n/a (skipped)
+    assert result[1] == "Agent-action"
+    # Row 2: show_face + unfamiliar_face + rep_lag=5
+    assert "Sensory-event" in result[2]
+    assert "Def/Unfamiliar-face-cond" in result[2]
+    assert "Item-interval/5" in result[2]
+
+    # No sidecar → None
+    assert _assemble_hed_from_sidecar(events_dict, None) is None
+
+    # Sidecar without HED → None
+    no_hed = tmp_path / "no_hed.json"
+    no_hed.write_text(json.dumps({"trial_type": {"Description": "foo"}}))
+    assert _assemble_hed_from_sidecar(events_dict, no_hed) is None
+
+
+def test_handle_events_reading_sidecar_hed(tmp_path):
+    """Test HEDAnnotations creation from JSON sidecar HED annotations."""
+    if not hasattr(mne, "HEDAnnotations"):
+        pytest.skip("HEDAnnotations requires a recent MNE-Python version")
+
+    # Copy tiny_bids — fixture already has HED in events.json and HEDVersion
+    bids_root = tmp_path / "tiny_bids"
+    sh.copytree(tiny_bids_root, bids_root)
+
+    eeg_dir = bids_root / "sub-01" / "ses-eeg" / "eeg"
+    events_tsv = eeg_dir / "sub-01_ses-eeg_task-rest_events.tsv"
+    events_json = eeg_dir / "sub-01_ses-eeg_task-rest_events.json"
+
+    info = mne.create_info(ch_names=["EEG1"], sfreq=5000.0, ch_types=["eeg"])
+    raw = mne.io.RawArray(np.zeros((1, 10000)), info)
+
+    raw_hed, _ = _handle_events_reading(
+        events_tsv,
+        raw.copy(),
+        bids_root=bids_root,
+        events_json_fname=events_json,
+    )
+    assert isinstance(raw_hed.annotations, mne.HEDAnnotations)
+    hed = list(raw_hed.annotations.hed_string)
+    assert hed[0] == "Experiment-structure"
+    assert hed[1] == "Sensory-event, Visual-presentation"
