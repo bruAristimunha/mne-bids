@@ -6,6 +6,7 @@ For each supported coordinate frame, implement a test.
 # Authors: The MNE-BIDS developers
 # SPDX-License-Identifier: BSD-3-Clause
 
+import json
 import warnings
 from pathlib import Path
 
@@ -23,10 +24,14 @@ from mne_bids.config import (
     MNE_STR_TO_FRAME,
 )
 from mne_bids.dig import (
+    _electrodes_metadata,
     _ensure_fiducials_ctf_head,
+    _find_ieeg_reference,
     _infer_coord_unit,
     _read_dig_bids,
     _write_dig_bids,
+    _write_electrodes_json,
+    _write_empty_ieeg_positions,
     convert_montage_to_mri,
     convert_montage_to_ras,
     template_to_head,
@@ -363,7 +368,7 @@ def test_convert_montage():
 
 
 @testing.requires_testing_data
-def test_electrodes_io(tmp_path):
+def test_electrodes_io(tmp_path, _bids_validate):
     """Ensure only electrodes end up in *_electrodes.json."""
     raw = _load_raw()
     raw.pick(["eeg", "stim"])  # we don't need meg channels
@@ -380,6 +385,198 @@ def test_electrodes_io(tmp_path):
         )  # don't need the header
         # only eeg chs w/ electrode pos should be written to electrodes.tsv
         assert n_entries == len(raw.get_channel_types("eeg"))
+
+    electrodes_json_path = electrodes_path.copy().update(extension=".json")
+    assert json.loads(electrodes_json_path.fpath.read_text()) == {
+        "SpatialReference": "n/a"
+    }
+    coordsystem = json.loads(
+        electrodes_path.copy()
+        .update(suffix="coordsystem", extension=".json")
+        .fpath.read_text()
+    )
+    assert "IntendedFor" not in coordsystem
+
+    _bids_validate(bids_root)
+
+
+_T1W_URI = "bids::sub-01/ses-01/anat/sub-01_ses-01_acq-01_T1w.nii.gz"
+_FSAVERAGE_URL = "https://www.templateflow.org/browse/?template=fsaverage"
+_MNI_URL = "https://www.templateflow.org/browse/?template=MNI152NLin2009cAsym"
+
+
+@testing.requires_testing_data
+@pytest.mark.parametrize(
+    "datatype, space, trans_to, add_t1w, spatial_ref, intended_for",
+    [
+        ("eeg", "fsaverage", "mri", False, _FSAVERAGE_URL, None),
+        ("ieeg", None, "ras", False, "n/a", None),
+        ("ieeg", None, "ras", True, _T1W_URI, _T1W_URI),
+    ],
+)
+def test_electrodes_json_write(
+    tmp_path,
+    datatype,
+    space,
+    trans_to,
+    add_t1w,
+    spatial_ref,
+    intended_for,
+):
+    """_write_dig_bids emits electrodes.json and wires IntendedFor correctly."""
+    bids_root = tmp_path / "bids1"
+    (bids_root / "sub-01" / "ses-01" / datatype).mkdir(parents=True)
+    if add_t1w:
+        anat = bids_root / "sub-01" / "ses-01" / "anat"
+        anat.mkdir(parents=True)
+        (anat / "sub-01_ses-01_acq-01_T1w.nii.gz").write_bytes(b"")
+
+    raw = _load_raw()
+    raw.pick(["eeg"])
+    montage = raw.get_montage()
+    montage.apply_trans(mne.transforms.Transform("head", trans_to))
+    bids_path = _bids_path.copy().update(root=bids_root, datatype=datatype, space=space)
+    _write_dig_bids(bids_path, raw, montage, acpc_aligned=True)
+
+    ejson = bids_path.copy().update(
+        task=None,
+        run=None,
+        space=space or "ACPC",
+        suffix="electrodes",
+        extension=".json",
+    )
+    assert json.loads(ejson.fpath.read_text()) == {"SpatialReference": spatial_ref}
+    coord = json.loads(ejson.copy().update(suffix="coordsystem").fpath.read_text())
+    assert coord.get("IntendedFor") == intended_for
+
+
+@testing.requires_testing_data
+def test_electrodes_json_empty_ieeg_positions(tmp_path):
+    """The empty-iEEG-positions path also emits electrodes.json with 'n/a'."""
+    bids_root = tmp_path / "bids1"
+    (bids_root / "sub-01" / "ses-01" / "ieeg").mkdir(parents=True)
+    raw = _load_raw()
+    raw.pick(["eeg"])
+    raw.set_montage(None)
+    bids_path = _bids_path.copy().update(root=bids_root, datatype="ieeg", space=None)
+    _write_empty_ieeg_positions(bids_path, raw)
+    ejson = bids_path.copy().update(
+        task=None, run=None, suffix="electrodes", extension=".json"
+    )
+    assert json.loads(ejson.fpath.read_text()) == {"SpatialReference": "n/a"}
+
+
+@pytest.mark.parametrize(
+    "existing, expected",
+    [
+        (None, {"SpatialReference": "n/a"}),
+        (
+            {"SpatialReference": "custom", "Manufacturer": "Foo"},
+            {"SpatialReference": "custom", "Manufacturer": "Foo"},
+        ),
+        (
+            {"Manufacturer": "Bar"},
+            {"SpatialReference": "n/a", "Manufacturer": "Bar"},
+        ),
+    ],
+)
+def test_write_electrodes_json_merge(tmp_path, existing, expected):
+    """_write_electrodes_json never clobbers user-provided keys."""
+    fname = tmp_path / "electrodes.json"
+    if existing is not None:
+        fname.write_text(json.dumps(existing))
+    _write_electrodes_json(fname, "n/a", overwrite=True)
+    assert json.loads(fname.read_text()) == expected
+
+
+@testing.requires_testing_data
+def test_electrodes_json_derivative(tmp_path):
+    """Derivative + non-standard space raises unless the sidecar is pre-supplied."""
+    from mne_bids import make_dataset_description
+
+    bids_root = tmp_path / "bids1"
+    (bids_root / "sub-01" / "ses-01" / "eeg").mkdir(parents=True)
+    make_dataset_description(
+        path=bids_root,
+        name="deriv",
+        dataset_type="derivative",
+        generated_by=[{"Name": "pipeline"}],
+    )
+
+    raw = _load_raw()
+    raw.pick(["eeg"])
+    montage = raw.get_montage()
+    bids_path = _bids_path.copy().update(root=bids_root, datatype="eeg")
+
+    # CapTrak (non-standard) in a derivative with no T1w and no pre-written
+    # sidecar → raise with an actionable message.
+    with pytest.raises(RuntimeError, match="derivative dataset"):
+        _write_dig_bids(bids_path, raw, montage, acpc_aligned=True)
+
+    # Pre-write the sidecar with a real URI; the additive merge keeps it and
+    # the raise is bypassed.
+    ejson = bids_path.copy().update(
+        task=None,
+        run=None,
+        space="CapTrak",
+        suffix="electrodes",
+        extension=".json",
+    )
+    ejson.fpath.write_text(json.dumps({"SpatialReference": "bids::custom.nii.gz"}))
+    _write_dig_bids(bids_path, raw, montage, acpc_aligned=True)
+    assert json.loads(ejson.fpath.read_text())["SpatialReference"] == (
+        "bids::custom.nii.gz"
+    )
+
+    # Standard template in a derivative: TemplateFlow URL passes the check.
+    bids_path_tpl = bids_path.copy().update(space="fsaverage")
+    montage_tpl = raw.get_montage()
+    montage_tpl.apply_trans(mne.transforms.Transform("head", "mri"))
+    _write_dig_bids(bids_path_tpl, raw, montage_tpl, acpc_aligned=True)
+    ejson_tpl = bids_path_tpl.copy().update(
+        task=None,
+        run=None,
+        suffix="electrodes",
+        extension=".json",
+    )
+    assert json.loads(ejson_tpl.fpath.read_text()) == {
+        "SpatialReference": _FSAVERAGE_URL
+    }
+
+
+@pytest.mark.parametrize(
+    "coord_frame, expected",
+    [
+        ("CapTrak", ("n/a", None)),
+        ("Other", ("n/a", None)),
+        ("MNI152NLin2009cAsym", (_MNI_URL, None)),
+    ],
+)
+def test_electrodes_metadata_no_ref(tmp_path, coord_frame, expected):
+    """Without a locatable reference image, SpatialReference falls back."""
+    bp = BIDSPath(root=tmp_path, subject="01", session="01", datatype="ieeg")
+    assert _electrodes_metadata(bp, coord_frame) == expected
+
+
+@pytest.mark.parametrize(
+    "t1w_files, expected",
+    [
+        ([], None),
+        (
+            ["sub-01_ses-01_T1w.nii.gz"],
+            "bids::sub-01/ses-01/anat/sub-01_ses-01_T1w.nii.gz",
+        ),
+        (["sub-01_ses-01_T1w.nii.gz", "sub-01_ses-01_acq-2_T1w.nii.gz"], None),
+    ],
+)
+def test_find_ieeg_reference_acpc(tmp_path, t1w_files, expected):
+    """IEEG ACPC returns the T1w URI only when exactly one match exists."""
+    anat = tmp_path / "sub-01" / "ses-01" / "anat"
+    anat.mkdir(parents=True)
+    for name in t1w_files:
+        (anat / name).write_bytes(b"")
+    bp = BIDSPath(root=tmp_path, subject="01", session="01", datatype="ieeg")
+    assert _find_ieeg_reference(bp, "ACPC") == expected
 
 
 @testing.requires_testing_data

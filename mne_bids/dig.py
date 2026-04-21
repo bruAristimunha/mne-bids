@@ -380,6 +380,7 @@ def _write_coordsystem_json(
     sensor_coord_system,
     fname,
     datatype,
+    intended_for=None,
     overwrite=False,
 ):
     """Create a coordsystem.json file and save it.
@@ -402,6 +403,9 @@ def _write_coordsystem_json(
     datatype : str
         Type of the data recording. Can be ``meg``, ``eeg``,
         or ``ieeg``.
+    intended_for : str | None
+        Value for the iEEG ``IntendedFor`` field (typically a BIDS URI to a
+        T1w or intraoperative photo). Ignored for non-iEEG datatypes.
     overwrite : bool
         Whether to overwrite the existing file.
         Defaults to False.
@@ -459,6 +463,8 @@ def _write_coordsystem_json(
             "iEEGCoordinateSystemDescription": sensor_coord_system_descr,
             "iEEGCoordinateUnits": unit,  # m (MNE), mm, cm , or pixels
         }
+        if intended_for is not None:
+            fid_json["IntendedFor"] = intended_for
     elif datatype == "nirs":
         fid_json = {
             "NIRSCoordinateSystem": sensor_coord_system,
@@ -482,6 +488,94 @@ def _write_coordsystem_json(
                 f'from the existing one, or set "overwrite" to True.'
             )
     _write_json(fname, fid_json, overwrite=True)
+
+
+def _find_ieeg_reference(bids_path, coord_frame):
+    """Locate a BIDS reference file for iEEG electrode coordinates.
+
+    Returns a BIDS URI pointing at the subject T1w (for ACPC/ScanRAS) or the
+    intraoperative photo (for Pixels) when exactly one such file exists in
+    the dataset. Returns ``None`` otherwise.
+    """
+    if bids_path.datatype != "ieeg" or bids_path.root is None:
+        return None
+
+    sub_dir = bids_path.root / f"sub-{bids_path.subject}"
+    if bids_path.session is not None:
+        sub_dir = sub_dir / f"ses-{bids_path.session}"
+
+    if coord_frame in ("ACPC", "ScanRAS"):
+        anat = sub_dir / "anat"
+        matches = [*anat.glob("*_T1w.nii.gz"), *anat.glob("*_T1w.nii")]
+    elif coord_frame == "Pixels":
+        matches = list((sub_dir / "ieeg").glob("*_photo.*"))
+    else:
+        return None
+
+    if len(matches) != 1:
+        return None
+    return f"bids::{matches[0].relative_to(bids_path.root).as_posix()}"
+
+
+def _electrodes_metadata(bids_path, coord_frame):
+    """Return ``(SpatialReference, IntendedFor)`` for the electrodes sidecars.
+
+    ``IntendedFor`` is only non-``None`` for iEEG with a locatable reference
+    image. The same value is reused as ``SpatialReference`` when available;
+    otherwise a TemplateFlow URL (standard templates) or ``"n/a"`` is used.
+    """
+    ref = _find_ieeg_reference(bids_path, coord_frame)
+    if ref is not None:
+        return ref, ref
+    if coord_frame in BIDS_STANDARD_TEMPLATE_COORDINATE_SYSTEMS:
+        return f"https://www.templateflow.org/browse/?template={coord_frame}", None
+    return "n/a", None
+
+
+def _is_derivative_dataset(bids_path):
+    """Return ``True`` if the dataset_description.json declares a derivative."""
+    if bids_path.root is None:
+        return False
+    dd = Path(bids_path.root) / "dataset_description.json"
+    if not dd.is_file():
+        return False
+    try:
+        return (
+            json.loads(dd.read_text(encoding="utf-8-sig")).get("DatasetType")
+            == "derivative"
+        )
+    except (json.JSONDecodeError, OSError):
+        return False
+
+
+def _write_electrodes_json(
+    fname, spatial_reference, *, require_real_ref=False, overwrite=False
+):
+    """Create an ``electrodes.json`` sidecar with a ``SpatialReference`` key.
+
+    If the file already exists, its keys are preserved (additive merge);
+    ``SpatialReference`` is only added when absent. Users wanting to reset
+    the sidecar must delete it first; ``overwrite`` does not clobber
+    user-supplied keys.
+
+    When ``require_real_ref`` is True (BIDS derivative + non-standard space),
+    a resulting ``SpatialReference`` of ``"n/a"`` is rejected, since the
+    BIDS validator requires a URI in that case.
+    """
+    fname = Path(fname)
+    data = {"SpatialReference": spatial_reference}
+    if fname.exists():
+        with _open_lock(fname, encoding="utf-8-sig") as fin:
+            data = {**data, **json.load(fin)}
+    if require_real_ref and data["SpatialReference"] == "n/a":
+        raise RuntimeError(
+            f"Cannot write BIDS-valid {fname.name} for a derivative dataset: "
+            "the coordinate space is not a standard template and no reference "
+            "image (T1w/photo) was found under the subject directory. "
+            "Pre-create this sidecar with your SpatialReference URI before "
+            "calling write_raw_bids; existing keys are preserved."
+        )
+    _write_json(fname, data, overwrite=True)
 
 
 def _write_empty_ieeg_positions(
@@ -513,6 +607,9 @@ def _write_empty_ieeg_positions(
     electrodes_path = BIDSPath(
         **electrode_entities, suffix="electrodes", extension=".tsv"
     )
+    electrodes_json_path = BIDSPath(
+        **electrode_entities, suffix="electrodes", extension=".json"
+    )
     coordsystem_path = BIDSPath(
         **coord_entities, suffix="coordsystem", extension=".json"
     )
@@ -522,6 +619,17 @@ def _write_empty_ieeg_positions(
         "with coordinates marked as unavailable."
     )
     _write_electrodes_tsv(raw, electrodes_path.fpath, bids_path.datatype, overwrite)
+    # Filename `space` may still name a frame (e.g. Pixels) whose reference we
+    # can resolve, even though iEEGCoordinateSystem below is hard-coded "Other".
+    lookup_space = bids_path.space or "Other"
+    spatial_ref, intended_for = _electrodes_metadata(bids_path, lookup_space)
+    _write_electrodes_json(
+        electrodes_json_path.fpath,
+        spatial_ref,
+        require_real_ref=_is_derivative_dataset(bids_path)
+        and lookup_space not in BIDS_STANDARD_TEMPLATE_COORDINATE_SYSTEMS,
+        overwrite=overwrite,
+    )
     _write_coordsystem_json(
         raw=raw,
         unit="n/a",
@@ -529,6 +637,7 @@ def _write_empty_ieeg_positions(
         sensor_coord_system="Other",
         fname=coordsystem_path,
         datatype=bids_path.datatype,
+        intended_for=intended_for,
         overwrite=overwrite,
     )
 
@@ -679,6 +788,19 @@ def _write_dig_bids(
 
     # Now write the data to the elec coords and the coordsystem
     _channels_fun(raw, channels_path, bids_path.datatype, overwrite)
+
+    spatial_ref, intended_for = _electrodes_metadata(bids_path, coord_frame)
+    if bids_path.datatype != "nirs":  # NIRS uses optodes.json, not electrodes.json
+        electrodes_json_path = BIDSPath(
+            **electrode_file_entities, suffix="electrodes", extension=".json"
+        )
+        _write_electrodes_json(
+            electrodes_json_path.fpath,
+            spatial_ref,
+            require_real_ref=_is_derivative_dataset(bids_path)
+            and coord_frame not in BIDS_STANDARD_TEMPLATE_COORDINATE_SYSTEMS,
+            overwrite=overwrite,
+        )
     _write_coordsystem_json(
         raw=raw,
         unit=unit,
@@ -686,6 +808,7 @@ def _write_dig_bids(
         sensor_coord_system=coord_frame,
         fname=coordsystem_path,
         datatype=bids_path.datatype,
+        intended_for=intended_for,
         overwrite=overwrite,
     )
 

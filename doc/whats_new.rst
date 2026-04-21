@@ -40,6 +40,7 @@ Detailed list of changes
 - :func:`mne_bids.read_raw_bids` now reads channel units from ``channels.tsv`` and sets them on the raw object. This includes support for units like ``rad`` (radians), ``V``, ``µV``, ``mV``, ``T``, ``T/m``, ``S``, ``oC``, ``M``, and ``px``. The write path was also updated to correctly write ``rad`` units to ``channels.tsv``, by `Alexandre Gramfort`_ (:gh:`1509`)
 - Added support for hashing ``BIDSPath`` objects so they can be used in caching and other contexts that require hashable objects, by `Eric Larson`_ (:gh:`1563`)
 - Speed up :func:`mne_bids.get_datatypes` by restricting filesystem traversal to ``bids_root/sub-*/(ses-*/)<datatype>`` directories, by `Eric Larson`_ (:gh:`1563`)
+- :func:`mne_bids.write_raw_bids` now writes a companion ``*_electrodes.json`` sidecar alongside ``*_electrodes.tsv`` (EEG and iEEG), populating ``SpatialReference`` with a BIDS URI to the subject T1w for ``ACPC``/``ScanRAS`` iEEG, a TemplateFlow URL for standard template spaces, or ``"n/a"``. For iEEG, the same reference is also written to ``IntendedFor`` in ``coordsystem.json`` when found. Existing user-provided sidecar keys are preserved. When ``dataset_description.json`` declares ``DatasetType`` as ``"derivative"``, writing raises if the resolved ``SpatialReference`` would be ``"n/a"`` for a non-standard space; supply a valid value by pre-creating the sidecar, by `Bruno Aristimunha`_ (:gh:`1545`)
 
 🧐 API and behavior changes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
