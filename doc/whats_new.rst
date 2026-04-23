@@ -64,6 +64,6 @@ Detailed list of changes
 ⚕️ Code health
 ^^^^^^^^^^^^^^
 
-- None yet
+- Replace ``assert`` with ``ValueError`` for data validation in :func:`mne_bids.copyfiles.copyfile_eeglab`, ensuring the check is not silently skipped under ``python -O``, by `Bruno Aristimunha`_ (:gh:`XXXX`)
 
 :doc:`Find out what was new in previous releases <whats_new_previous_releases>`
