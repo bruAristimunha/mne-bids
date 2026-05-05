@@ -28,7 +28,7 @@ from numpy.testing import assert_almost_equal
 
 import mne_bids.utils
 import mne_bids.write
-from mne_bids import BIDSPath
+from mne_bids import BIDSPath, read_epochs_bids
 from mne_bids.config import (
     BIDS_SHARED_COORDINATE_FRAMES,
     BIDS_TO_MNE_FRAMES,
@@ -1571,13 +1571,13 @@ def test_handle_ieeg_coords_reading(bids_path, tmp_path):
     for digpoint in raw_test.info["dig"]:
         assert digpoint["coord_frame"] == coord_frame_int
 
-    # if we delete the coordsystem.json file, an error will be raised
+    # if we delete the coordsystem.json file, a warning is emitted
     os.remove(coordsystem_fname)
-    with pytest.raises(
-        RuntimeError,
+    with pytest.warns(
+        RuntimeWarning,
         match="coordsystem.json is REQUIRED whenever electrodes.tsv is present",
     ):
-        raw = read_raw_bids(bids_path=bids_fname, verbose=False)
+        read_raw_bids(bids_path=bids_fname, verbose=False)
 
     # test error message if electrodes is not a subset of Raw
     bids_path.update(root=tmp_path)
@@ -2093,6 +2093,47 @@ def test_channel_mismatch_invalid_option(tmp_path):
         _handle_channels_reading(channels_fname, raw.copy(), on_ch_mismatch="invalid")
 
 
+def test_channel_mismatch_warn_default(tmp_path):
+    """Channel-name mismatch warns by default and leaves raw channel names intact."""
+    raw, ch_order_snirf, _, channels_fname, _, _ = _setup_nirs_channel_mismatch(
+        tmp_path
+    )
+    with pytest.warns(RuntimeWarning, match="Channel mismatch"):
+        out = _handle_channels_reading(channels_fname, raw.copy())
+    assert out.ch_names == ch_order_snirf
+
+
+@pytest.mark.filterwarnings("ignore:.*loadtxt:UserWarning")
+@pytest.mark.filterwarnings("ignore:TSV file is empty:RuntimeWarning")
+@pytest.mark.parametrize(
+    "content",
+    ["", "channel_name\ttype\nA\tEEG\nB\tEEG\n"],
+    ids=["empty", "wrong-header"],
+)
+def test_channels_tsv_empty_or_missing_name(tmp_path, content):
+    """Empty channels.tsv or one without a 'name' column is skipped, not a crash."""
+    raw, _, _, channels_fname, _, _ = _setup_nirs_channel_mismatch(tmp_path)
+    channels_fname.write_text(content, encoding="utf-8")
+    with pytest.warns(RuntimeWarning, match="empty or has no 'name' column"):
+        out = _handle_channels_reading(
+            channels_fname, raw.copy(), on_ch_mismatch="rename"
+        )
+    assert out.ch_names == raw.ch_names
+
+
+def test_channels_tsv_duplicate_names(tmp_path):
+    """Duplicate channel names in channels.tsv are deduplicated with -0/-1 suffixes."""
+    raw, _, _, channels_fname, _, _ = _setup_nirs_channel_mismatch(tmp_path)
+    n_ch = len(raw.ch_names)
+    rows = "\n".join(["EEG\tNIRSCWAMPLITUDE"] * n_ch)
+    channels_fname.write_text(f"name\ttype\n{rows}\n", encoding="utf-8")
+    with pytest.warns(RuntimeWarning, match="Channel names are not unique"):
+        out = _handle_channels_reading(
+            channels_fname, raw.copy(), on_ch_mismatch="rename"
+        )
+    assert out.ch_names == [f"EEG-{i}" for i in range(n_ch)]
+
+
 @pytest.mark.filterwarnings(warning_str["channel_unit_changed"])
 def test_channel_units_from_tsv(tmp_path):
     """Test that channel units are correctly read from channels.tsv."""
@@ -2468,3 +2509,30 @@ def test_read_hed_version_returns_none(tmp_path, bids_root):
     """_read_hed_version returns None for absent root / missing file."""
     root = None if bids_root is None else tmp_path / bids_root
     assert _read_hed_version(root) is None
+
+
+@testing.requires_testing_data
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_read_epochs_bids_eeglab(tmp_path):
+    """read_epochs_bids loads EEGLAB epoched data; read_raw_bids refuses it."""
+    src = data_path / "EEGLAB" / "test_epochs.set"
+    bp = BIDSPath(subject="01", task="t", datatype="eeg", root=tmp_path)
+    bp.directory.mkdir(parents=True)
+    sh.copy(src, bp.update(suffix="eeg", extension=".set").fpath)
+    sh.copy(src.with_suffix(".fdt"), bp.fpath.with_suffix(".fdt"))
+    expected = mne.io.read_epochs_eeglab(src, verbose=False)
+    bp.copy().update(extension=".json").fpath.write_text(
+        '{"TaskName": "t", "PowerLineFrequency": 60, "RecordingType": "epoched"}'
+    )
+    bp.copy().update(suffix="channels", extension=".tsv").fpath.write_text(
+        "name\ttype\tunits\n" + "".join(f"{c}\tEEG\tµV\n" for c in expected.ch_names),
+        encoding="utf-8",
+    )
+    (tmp_path / "dataset_description.json").write_text(
+        '{"Name": "x", "BIDSVersion": "1.8.0"}'
+    )
+    epochs = read_epochs_bids(bp)
+    assert epochs.ch_names == expected.ch_names
+    assert epochs.info["line_freq"] == 60
+    with pytest.raises(RuntimeError, match="read_epochs_bids"):
+        read_raw_bids(bp)

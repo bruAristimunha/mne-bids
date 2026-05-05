@@ -13,6 +13,7 @@ from pathlib import Path
 import mne
 import numpy as np
 from mne import events_from_annotations, io, pick_channels_regexp, read_events
+from mne._fiff.meas_info import _unique_channel_names
 from mne.coreg import fit_matched_points
 from mne.transforms import apply_trans
 from mne.utils import check_version, get_subjects_dir, logger
@@ -24,6 +25,7 @@ from mne_bids.config import (
     EPHY_ALLOWED_DATATYPES,
     UNITS_BIDS_TO_FIFF_MAP,
     _map_options,
+    epoch_reader,
     reader,
 )
 from mne_bids.dig import _read_dig_bids
@@ -1007,13 +1009,19 @@ def _get_bads_from_tsv_data(tsv_data):
 
 
 def _handle_channel_mismatch(raw, on_ch_mismatch, ch_names_tsv, channels_fname):
-    """Handle mismatch between channels.tsv and raw channel names."""
+    """Handle mismatch. Returns True if caller should skip channels.tsv metadata."""
     if on_ch_mismatch == "raise":
         raise RuntimeError(
             f"Channel mismatch between {channels_fname} and the raw data file detected."
             f"Either align channel names in channels.tsv with the raw file, or call "
-            f"read_raw_bids(on_ch_mismatch='reorder'|'rename') to proceed."
+            f"read_raw_bids(on_ch_mismatch='reorder'|'rename'|'warn') to proceed."
         )
+    if on_ch_mismatch == "warn":
+        warn(
+            f"Channel mismatch between {channels_fname} and the raw data file. "
+            "Skipping channels.tsv-derived channel metadata."
+        )
+        return True
     logger.info(
         "Channel mismatch between "
         f"{channels_fname} and the raw data file detected. "
@@ -1024,17 +1032,27 @@ def _handle_channel_mismatch(raw, on_ch_mismatch, ch_names_tsv, channels_fname):
     elif on_ch_mismatch == "rename":
         raw.rename_channels(dict(zip(raw.ch_names, ch_names_tsv)))
     else:
-        raise ValueError("on_ch_mismatch must be one of {'reorder','raise','rename'}")
+        raise ValueError(
+            "on_ch_mismatch must be one of {'reorder','raise','rename','warn'}"
+        )
 
 
-def _handle_channels_reading(channels_fname, raw, on_ch_mismatch="raise"):
+def _handle_channels_reading(channels_fname, raw, on_ch_mismatch="warn"):
     """Read associated channels.tsv and populate raw.
 
     Updates status (bad) and types of channels.
     """
     logger.info(f"Reading channel info from {channels_fname}.")
     channels_dict = _from_tsv(channels_fname)
+    if not channels_dict.get("name"):
+        warn(
+            f"{channels_fname} is empty or has no 'name' column; "
+            "skipping channel metadata."
+        )
+        return raw
     ch_names_tsv = channels_dict["name"]
+    if len(set(ch_names_tsv)) != len(ch_names_tsv):
+        _unique_channel_names(ch_names_tsv)
 
     # Now we can do some work.
     # The "type" column is mandatory in BIDS. We can use it to set channel
@@ -1111,8 +1129,10 @@ def _handle_channels_reading(channels_fname, raw, on_ch_mismatch="raise"):
         )
     else:
         orig_names = list(raw.ch_names)
-        if orig_names != ch_names_tsv:
-            _handle_channel_mismatch(raw, on_ch_mismatch, ch_names_tsv, channels_fname)
+        if orig_names != ch_names_tsv and _handle_channel_mismatch(
+            raw, on_ch_mismatch, ch_names_tsv, channels_fname
+        ):
+            return raw
 
     # Set the channel types in the raw data according to channels.tsv
     channel_type_bids_mne_map_available_channels = {
@@ -1165,7 +1185,7 @@ def read_raw_bids(
     extra_params=None,
     *,
     return_event_dict=False,
-    on_ch_mismatch="raise",
+    on_ch_mismatch="warn",
     verbose=None,
 ):
     """Read BIDS compatible data.
@@ -1199,8 +1219,11 @@ def read_raw_bids(
     on_ch_mismatch : str
         How to handle a mismatch between channel names in channels.tsv file
         and channel names in the raw data file.
-        Must be one of ``'raise'``, ``'reorder'``, ``'rename'`` (default ``'raise'``).
+        Must be one of ``'warn'``, ``'raise'``, ``'reorder'``, ``'rename'``
+        (default ``'warn'``).
 
+        * ``'warn'`` will emit a warning and leave the raw data unchanged,
+          skipping channels.tsv-derived channel metadata.
         * ``'raise'`` will raise a RuntimeError if there is a channel mismatch.
         * ``'reorder'`` will reorder the channels in the raw data file to match the
           channel order in the channels.tsv file.
@@ -1273,6 +1296,17 @@ def read_raw_bids(
         bids_path.update(datatype=datatype)
     if suffix is None:
         bids_path.update(suffix=datatype)
+
+    sidecar_json_fname = _find_matching_sidecar(
+        bids_path, suffix=datatype, extension=".json", on_error="ignore"
+    )
+    if sidecar_json_fname is not None:
+        with _open_lock(sidecar_json_fname, encoding="utf-8-sig") as fin:
+            if json.load(fin).get("RecordingType") == "epoched":
+                raise RuntimeError(
+                    'RecordingType is "epoched"; use mne_bids.read_epochs_bids() '
+                    "instead of read_raw_bids()."
+                )
 
     if bids_path.extension == ".pdf":
         bids_raw_folder = bids_path.directory / f"{bids_path.basename}"
@@ -1377,6 +1411,19 @@ def read_raw_bids(
             events_json_fname=events_json_fname,
         )
 
+    raw = _attach_sidecars(raw, bids_path, on_ch_mismatch=on_ch_mismatch)
+
+    assert raw.annotations.orig_time == raw.info["meas_date"]
+    if return_event_dict:
+        return raw, event_id
+    return raw
+
+
+def _attach_sidecars(raw, bids_path, *, on_ch_mismatch):
+    """Apply BIDS sidecars to a Raw or Epochs object."""
+    datatype = bids_path.datatype
+    bids_root = bids_path.root
+
     # Try to find an associated channels.tsv to get information about the
     # status and type of present channels
     channels_fname = _find_matching_sidecar(
@@ -1407,8 +1454,6 @@ def read_raw_bids(
                     f"Please add coordsystem.json for {bids_path.basename} and "
                     "re-run the BIDS validator."
                 )
-                if datatype == "ieeg":
-                    raise RuntimeError(msg)
                 warn(msg + " Skipping reading electrode locations.")
             elif datatype in ("meg", "eeg", "ieeg"):
                 _read_dig_bids(
@@ -1435,7 +1480,8 @@ def read_raw_bids(
         root=bids_path.root,
     ).fpath
 
-    if scans_fname.exists():
+    # Epochs without annotations crash in set_meas_date; skip the scans path.
+    if scans_fname.exists() and getattr(raw, "annotations", None) is not None:
         raw = _handle_scans_reading(scans_fname, raw, bids_path)
 
     # read in associated subject info from participants.tsv
@@ -1446,13 +1492,57 @@ def read_raw_bids(
             participants_fname=participants_tsv_path, raw=raw, subject=subject
         )
     else:
-        warn(f"participants.tsv file not found for {raw_path}")
+        warn(f"participants.tsv file not found for {bids_path.fpath}")
         raw.info["subject_info"] = dict()
 
-    assert raw.annotations.orig_time == raw.info["meas_date"]
-    if return_event_dict:
-        return raw, event_id
     return raw
+
+
+@verbose
+def read_epochs_bids(
+    bids_path, extra_params=None, *, on_ch_mismatch="raise", verbose=None
+):
+    """Read pre-epoched BIDS data (RecordingType="epoched") as :class:`mne.Epochs`.
+
+    EEGLAB ``.set`` only for now. The same sidecars as
+    :func:`read_raw_bids` are applied (channels, electrodes, coordsystem,
+    scans, participants).
+
+    Parameters
+    ----------
+    bids_path : BIDSPath
+        Same semantics as :func:`read_raw_bids`.
+    extra_params : None | dict
+        Forwarded to the underlying MNE epochs reader.
+    on_ch_mismatch : str
+        See :func:`read_raw_bids`.
+    %(verbose)s
+
+    Returns
+    -------
+    epochs : mne.Epochs
+        The epoched data with BIDS sidecar metadata applied.
+    """
+    if not isinstance(bids_path, BIDSPath):
+        raise RuntimeError('"bids_path" must be a BIDSPath object.')
+    bids_path = bids_path.copy()
+    if bids_path.datatype is None:
+        bids_path.update(
+            datatype=_infer_datatype(
+                root=bids_path.root, sub=bids_path.subject, ses=bids_path.session
+            )
+        )
+    if bids_path.suffix is None:
+        bids_path.update(suffix=bids_path.datatype)
+
+    ext = bids_path.fpath.suffix
+    if ext not in epoch_reader:
+        raise RuntimeError(
+            f"read_epochs_bids does not support {ext!r} epoched files; "
+            f"supported: {sorted(epoch_reader)}."
+        )
+    epochs = epoch_reader[ext](bids_path.fpath, verbose=verbose, **(extra_params or {}))
+    return _attach_sidecars(epochs, bids_path, on_ch_mismatch=on_ch_mismatch)
 
 
 @verbose
