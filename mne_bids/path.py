@@ -1261,10 +1261,18 @@ class BIDSPath:
                 "BIDS root directory path to `root` via "
                 "BIDSPath.update()."
             )
+        entities = {key: [val] for key, val in self.entities.items() if val is not None}
         kwargs = {
-            f"{key}s": [val] for key, val in self.entities.items() if val is not None
+            f"{key}s": val
+            for key, val in entities.items()
+            if key in _FIND_KEYWORD_ENTITIES
         }
         kwargs.update(
+            entities={
+                key: val
+                for key, val in entities.items()
+                if key not in _FIND_KEYWORD_ENTITIES
+            },
             root=self.root,
             check=check,
             ignore_json=ignore_json,
@@ -2865,23 +2873,7 @@ def _literal_suffix(pattern):
     return "".join(reversed(out))
 
 
-def _filter_fnames(
-    fnames,
-    *,
-    subject=None,
-    session=None,
-    task=None,
-    acquisition=None,
-    run=None,
-    processing=None,
-    recording=None,
-    space=None,
-    split=None,
-    description=None,
-    suffix=None,
-    extension=None,
-    tracking_system=None,
-):
+def _filter_fnames(fnames, *, suffix=None, extension=None, **entities):
     """Filter a list of BIDS filenames / paths based on BIDS entity values.
 
     Input can be str or list of str.
@@ -2889,77 +2881,44 @@ def _filter_fnames(
     Parameters
     ----------
     fnames : iterable of pathlib.Path | iterable of str
+        The names to filter. A chained fsspec URL (``"<url>::<url>"``) is
+        matched by its part before ``"::"``.
+    suffix, extension, **entities : str | iterable of str | None
+        The values to keep, by long entity name (e.g., ``subject``).
 
     Returns
     -------
-    list of pathlib.Path
+    list of pathlib.Path | list of str
+        The matching names of ``fnames``, sorted and as given.
     """
-    subject = _ensure_tuple(subject)
-    session = _ensure_tuple(session)
-    task = _ensure_tuple(task)
-    acquisition = _ensure_tuple(acquisition)
-    run = _ensure_tuple(run)
-    processing = _ensure_tuple(processing)
-    space = _ensure_tuple(space)
-    recording = _ensure_tuple(recording)
-    split = _ensure_tuple(split)
-    description = _ensure_tuple(description)
     suffix = _ensure_tuple(suffix)
     extension = _ensure_tuple(extension)
-    tracking_system = _ensure_tuple(tracking_system)
 
     leading_path_str = r".*\/?"  # nothing or something ending with a `/`
-    sub_str = r"sub-(" + "|".join(subject) + ")" if subject else r"sub-([^_]+)"
-    ses_str = r"_ses-(" + "|".join(session) + ")" if session else r"(|_ses-([^_]+))"
-    task_str = r"_task-(" + "|".join(task) + ")" if task else r"(|_task-([^_]+))"
-    acq_str = (
-        r"_acq-(" + "|".join(acquisition) + ")" if acquisition else r"(|_acq-([^_]+))"
-    )
-    run_str = r"_run-(" + "|".join(run) + ")" if run else r"(|_run-([^_]+))"
-    proc_str = (
-        r"_proc-(" + "|".join(processing) + ")" if processing else r"(|_proc-([^_]+))"
-    )
-    space_str = r"_space-(" + "|".join(space) + ")" if space else r"(|_space-([^_]+))"
-    rec_str = (
-        r"_recording-(" + "|".join(recording) + ")"
-        if recording
-        else r"(|_recording-([^_]+))"
-    )
-    split_str = r"_split-(" + "|".join(split) + ")" if split else r"(|_split-([^_]+))"
-    desc_str = (
-        r"_desc-(" + "|".join(description) + ")" if description else r"(|_desc-([^_]+))"
-    )
+    # One ``_<short>-<value>`` group per entity in the filename order, optional
+    # unless values are given, except that every name starts with ``sub-``.
+    entities_str = ""
+    for short, long in ALLOWED_PATH_ENTITIES_SHORT.items():
+        values = _ensure_tuple(entities.get(long))
+        group = rf"{short}-(" + ("|".join(values) if values else r"[^_]+") + ")"
+        if long == "subject":
+            entities_str += group
+        elif values:
+            entities_str += "_" + group
+        else:
+            entities_str += f"(|_{group})"
     suffix_str = r"_(" + "|".join(suffix) + ")" if suffix else r"_([^_]+)"
     ext_str = (
         r"(" + "|".join(re.escape(ext) for ext in extension) + ")$"
         if extension
         else r"\.([^_]+)"
     )
-    tracksys_str = (
-        r"_tracksys-(" + "|".join(tracking_system) + ")"
-        if tracking_system
-        else r"(|_tracksys-([^_]+))"
-    )
 
-    regexp = (
-        leading_path_str
-        + sub_str
-        + ses_str
-        + task_str
-        + tracksys_str
-        + acq_str
-        + run_str
-        + proc_str
-        + space_str
-        + rec_str
-        + split_str
-        + desc_str
-        + suffix_str
-        + ext_str
-    )
+    regexp = leading_path_str + entities_str + suffix_str + ext_str
 
-    # Convert to str so we can apply the regexp ...
-    fnames = [str(f) for f in fnames]
+    # Match a chained fsspec URL (``zip://sub-01/.../x_eeg.edf::/tmp/x.zip``) by
+    # its part before "::", but return every name as given (str or Path).
+    names = [(str(fname).partition("::")[0], fname) for fname in fnames]
 
     # The regexp ends with the extension alternatives followed by ``$``, so
     # every name it can match ends with one of their literal tails. Rejecting
@@ -2968,14 +2927,26 @@ def _filter_fnames(
     # candidate (28x on a 4800-file tree).
     tails = tuple(_literal_suffix(ext) for ext in extension)
     if tails and all(tails):
-        fnames = [fname for fname in fnames if fname.endswith(tails)]
+        names = [(name, fname) for name, fname in names if name.endswith(tails)]
 
-    # https://stackoverflow.com/a/51246151/1944216
-    fnames_filtered = sorted(filter(re.compile(regexp).match, fnames))
+    match = re.compile(regexp).match
+    return sorted((fname for name, fname in names if match(name)), key=str)
 
-    # ... and return Paths.
-    fnames_filtered = [Path(f) for f in fnames_filtered]
-    return fnames_filtered
+
+# The entities that find_matching_paths has a keyword argument for (``subjects``, ...)
+_FIND_KEYWORD_ENTITIES = (
+    "subject",
+    "session",
+    "task",
+    "acquisition",
+    "run",
+    "processing",
+    "recording",
+    "space",
+    "split",
+    "description",
+    "tracking_system",
+)
 
 
 def find_matching_paths(
@@ -2992,6 +2963,7 @@ def find_matching_paths(
     descriptions=None,
     *,
     tracking_systems=None,
+    entities=None,
     suffixes=None,
     extensions=None,
     datatypes=None,
@@ -3046,6 +3018,15 @@ def find_matching_paths(
         ``tracksys-omcA``.
 
         .. versionadded:: 0.19
+    entities : dict | None
+        The values to match for the BIDS entities that have no keyword argument
+        of their own, by entity name (as in :attr:`mne_bids.BIDSPath.entities`).
+        For example, ``entities={"echo": "1"}`` matches filenames containing
+        ``echo-1``, and ``entities={"reconstruction": ["norm", "raw"]}`` those
+        containing ``rec-norm`` or ``rec-raw``. Each value can be a str, an
+        array-like of str, or None.
+
+        .. versionadded:: 0.21
     suffixes : str | array-like of str | None
         The filename suffix. This is the entity after the
         last ``_`` before the extension. E.g., ``'channels'``.
@@ -3075,6 +3056,18 @@ def find_matching_paths(
     bids_paths : list of mne_bids.BIDSPath
         The matching paths.
     """
+    entities = dict() if entities is None else entities
+    allowed = [
+        entity
+        for entity in ALLOWED_PATH_ENTITIES_SHORT.values()
+        if entity not in _FIND_KEYWORD_ENTITIES
+    ]
+    unknown = sorted(set(entities).difference(allowed))
+    if unknown:
+        raise ValueError(
+            f"entities got {unknown}, but its keys must be among {allowed}; the "
+            "other entities have keyword arguments of their own, such as subjects."
+        )
     entities_opt = dict()
     if subjects is not None:
         if isinstance(subjects, str):
@@ -3109,6 +3102,7 @@ def find_matching_paths(
         tracking_system=tracking_systems,
         suffix=suffixes,
         extension=extensions,
+        **entities,
     )
 
     bids_paths = _fnames_to_bidspaths(fpaths_filtered, root, check=check)

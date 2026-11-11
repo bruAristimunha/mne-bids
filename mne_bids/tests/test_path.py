@@ -1838,6 +1838,27 @@ def test_filter_fnames_literal_extension(extension):
     assert _filter_fnames([valid, invalid], extension=extension) == [valid]
 
 
+def test_filter_fnames_mri():
+    """Keep the files with any BIDS entity, such as echo or rec (gh-1702)."""
+    fnames = [
+        "sub-01/func/sub-01_task-rest_echo-1_bold.nii.gz",
+        "sub-01/anat/sub-01_rec-norm_T1w.nii.gz",
+        "sub-01/eeg/sub-01_task-rest_eeg.vhdr",
+    ]
+    assert _filter_fnames(fnames) == sorted(fnames)
+    assert _filter_fnames(fnames, suffix=["bold", "T1w"]) == sorted(fnames[:2])
+    assert _filter_fnames(fnames, echo="1") == fnames[:1]
+
+
+@pytest.mark.parametrize("extension", [None, ".edf"])
+@pytest.mark.parametrize("cls", [str, Path])
+def test_filter_fnames_chained_url(cls, extension):
+    """Match a chained fsspec URL by its part before "::" and return it as given."""
+    url = cls("zip://sub-01/eeg/sub-01_task-x_eeg.edf::/tmp/x.zip")
+    assert _filter_fnames([url], extension=extension) == [url]
+    assert _filter_fnames([url], task="y", extension=extension) == []
+
+
 def test_match_basic(bids_root):
     """Test retrieval of matching basenames."""
     bids_path_01 = BIDSPath(root=bids_root)
@@ -2097,6 +2118,22 @@ def test_find_matching_paths_skips_non_bidspath(tmp_path, check):
     assert [path.fpath for path in paths] == [good]
     paths = BIDSPath(root=tmp_path).match(check=check)
     assert [path.fpath for path in paths] == [good]
+
+
+def test_match_entities_without_keyword(tmp_path):
+    """Match the entities that find_matching_paths has no keyword for."""
+    func_dir = tmp_path / "sub-01" / "func"
+    func_dir.mkdir(parents=True)
+    fnames = [func_dir / f"sub-01_task-rest_echo-{echo}_bold.nii.gz" for echo in "12"]
+    for fname in fnames:
+        fname.touch()
+    paths = BIDSPath(subject="01", task="rest", echo="1", root=tmp_path).match()
+    assert [path.fpath for path in paths] == fnames[:1]
+    paths = find_matching_paths(tmp_path, entities={"echo": ["1", "2"]})
+    assert [path.fpath for path in paths] == fnames
+    for key in ("subject", "foo"):
+        with pytest.raises(ValueError, match=f"entities got \\['{key}'\\]"):
+            find_matching_paths(tmp_path, entities={key: "01"})
 
 
 def test_return_root_paths_entity_aware(tmp_path):
