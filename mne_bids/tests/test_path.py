@@ -1855,13 +1855,16 @@ def test_filter_fnames_mri():
 @pytest.mark.parametrize(
     "url",
     [
+        "hf://datasets/org/repo/sub-01/eeg/sub-01_task-x_eeg.edf",
+        "s3://openneuro.org/ds000248/sub-01/eeg/sub-01_task-x_eeg.edf",
         "zip://sub-01/eeg/sub-01_task-x_eeg.edf::/tmp/x.zip",
         "simplecache::s3://bucket/sub-01/eeg/sub-01_task-x_eeg.edf",
     ],
 )
-def test_filter_fnames_chained_url(url, cls, extension):
-    """Match a chained fsspec URL by its first part with a "/", return it as given."""
+def test_filter_fnames_url(url, cls, extension):
+    """Match a URL, chained ones by their first part with a "/", return it as given."""
     url = cls(url)
+    # a Path is never equal to a str, so this also checks that a Path stays one
     assert _filter_fnames([url], extension=extension) == [url]
     assert _filter_fnames([url], task="y", extension=extension) == []
 
