@@ -411,7 +411,7 @@ ALLOWED_PATH_ENTITIES_SHORT = {
 }
 
 # Annotations to never remove during reading or writing
-ANNOTATIONS_TO_KEEP = ("BAD_ACQ_SKIP",)
+ANNOTATIONS_TO_KEEP = ("BAD_ACQ_SKIP", "BAD_nwb_invalid")
 
 BIDS_STANDARD_TEMPLATE_COORDINATE_SYSTEMS = [
     "ICBM452AirSpace",

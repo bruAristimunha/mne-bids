@@ -186,7 +186,9 @@ def test_nwb_requires_supported_mne(tmp_path, monkeypatch):
 )
 def test_read_raw_bids_nwb(tmp_path):
     """Read NWB samples and apply the BIDS sidecars."""
-    h5py = pytest.importorskip("h5py")
+    pynwb = pytest.importorskip("pynwb", minversion="4.2")
+    from pynwb.ecephys import ElectricalSeries
+
     bp = BIDSPath(
         subject="01",
         task="test",
@@ -197,15 +199,28 @@ def test_read_raw_bids_nwb(tmp_path):
     )
     bp.mkdir()
     data = np.arange(200).reshape(100, 2)
-    with h5py.File(bp.fpath, "w") as f:
-        f["session_start_time"] = "2020-01-01T00:00:00Z"
-        table = f.create_group("general/extracellular_ephys/electrodes")
-        table["id"] = [10, 20]
-        es = f.create_group("acquisition/signal")
-        es.attrs["neurodata_type"] = "ElectricalSeries"
-        es.create_dataset("data", data=data).attrs.update(unit="volts", conversion=1e-6)
-        es.create_dataset("starting_time", data=0.0).attrs["rate"] = 100.0
-        es.create_dataset("electrodes", data=[0, 1]).attrs["table"] = table.ref
+    nwb = pynwb.NWBFile(
+        "Synthetic session", "synthetic", datetime(2020, 1, 1, tzinfo=UTC)
+    )
+    device = nwb.create_device(name="recorder")
+    group = nwb.create_electrode_group("grid", "grid", "cortex", device)
+    for electrode_id in [10, 20]:
+        nwb.add_electrode(id=electrode_id, location="cortex", group=group)
+    electrodes = nwb.create_electrode_table_region([0, 1], "all electrodes")
+    nwb.add_acquisition(
+        ElectricalSeries(
+            name="signal",
+            data=data,
+            electrodes=electrodes,
+            conversion=1e-6,
+            rate=100.0,
+            starting_time=0.0,
+        )
+    )
+    nwb.add_invalid_time_interval(start_time=0.4, stop_time=0.6)
+    nwb.add_trial(start_time=0.7, stop_time=0.8)
+    with pynwb.NWBHDF5IO(bp.fpath, "w") as writer:
+        writer.write(nwb)
     bp.copy().update(suffix="channels", extension=".tsv").fpath.write_text(
         "name\ttype\tunits\tstatus\nA1\tECOG\tV\tgood\nA2\tECOG\tV\tbad\n"
     )
@@ -232,8 +247,10 @@ def test_read_raw_bids_nwb(tmp_path):
     assert raw.info["bads"] == ["A2"]
     assert raw.info["line_freq"] == 50
     assert raw.info["subject_info"]["sex"] == 2
-    assert list(raw.annotations.description) == ["stimulus"]
-    np.testing.assert_allclose(raw.annotations.onset, [0.1])
+    assert list(raw.annotations.description) == ["stimulus", "BAD_nwb_invalid"]
+    np.testing.assert_allclose(raw.annotations.onset, [0.1, 0.4])
+    np.testing.assert_allclose(raw.annotations.duration, [0.2, 0.2])
+    assert raw.get_data(reject_by_annotation="omit").shape[1] == 80
     np.testing.assert_allclose(raw.info["chs"][0]["loc"][:3], [0.01, 0.02, 0.03])
 
 
