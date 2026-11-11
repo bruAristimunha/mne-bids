@@ -41,6 +41,7 @@ from mne_bids.read import (
     _assemble_hed_from_sidecar,
     _handle_channels_reading,
     _handle_events_reading,
+    _handle_participants_reading,
     _handle_scans_reading,
     _read_hed_version,
     _read_raw,
@@ -2623,3 +2624,40 @@ def test_read_epochs_bids_continuous(tmp_path, ext, fmt, writer_pkg):
     assert epochs.get_data().shape == (n_ep, 2, n_per)
     assert set(epochs.event_id) == {"A", "B"}
     assert len(epochs["A"]) == 2 and len(epochs["B"]) == 1  # last 'B' was dropped
+
+
+@pytest.mark.parametrize("age", ["2018", "inf"])
+def test_unrepresentable_participant_age(tmp_path, age):
+    """An invalid birthday must not discard the rest of the participant row."""
+    fname = tmp_path / "participants.tsv"
+    fname.write_text(f"participant_id\tage\tsex\nsub-01\t{age}\tF\n")
+    raw = mne.io.RawArray(np.zeros((1, 100)), mne.create_info(["A"], 100.0, "eeg"))
+    raw.set_meas_date(datetime(2019, 1, 1, tzinfo=UTC))
+    _handle_participants_reading(fname, raw, "sub-01")
+    assert "birthday" not in raw.info["subject_info"]
+    assert raw.info["subject_info"]["sex"] == 2
+
+
+@pytest.mark.parametrize("column", ["description", "ch_names", "hed_string"])
+def test_reserved_event_extras(tmp_path, column):
+    """Keep both a reserved column and an existing prefixed column."""
+    fname = tmp_path / "events.tsv"
+    fname.write_text(
+        f"onset\tduration\ttrial_type\t{column}\tevents_{column}\n0.1\t0.2\tgo\tleft\tright\n"
+    )
+    raw = mne.io.RawArray(np.zeros((1, 100)), mne.create_info(["A"], 100.0, "eeg"))
+    with pytest.warns(RuntimeWarning, match="reserved"):
+        _handle_events_reading(fname, raw)
+    assert raw.annotations.extras[0][f"events_events_{column}"] == "left"
+    assert raw.annotations.extras[0][f"events_{column}"] == "right"
+
+
+def test_negative_event_duration(tmp_path):
+    """A negative duration is clamped before MNE crops the annotations."""
+    fname = tmp_path / "events.tsv"
+    fname.write_text("onset\tduration\ttrial_type\n0.1\t-0.2\tgo\n0.5\t0.2\tstop\n")
+    raw = mne.io.RawArray(np.zeros((1, 100)), mne.create_info(["A"], 100.0, "eeg"))
+    with pytest.warns(RuntimeWarning, match="negative duration"):
+        _handle_events_reading(fname, raw)
+    np.testing.assert_allclose(raw.annotations.duration, [0.0, 0.2])
+    assert list(raw.annotations.description) == ["go", "stop"]

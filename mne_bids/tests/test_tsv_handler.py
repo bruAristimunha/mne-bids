@@ -137,9 +137,10 @@ def test_contains_row_different_types():
         ("name\tunit\nEEG\tµV\n".encode(), "utf-8"),
         (codecs.BOM_UTF8 + b"name\tunit\nEEG\tuV\n", "utf-8-sig"),
         ("name\tunit\nEEG\tµV\n".encode("utf-16"), "utf-16"),
-        (b"name\tunit\nEEG\t\xb5V\n", "latin-1"),
+        (b"name\tunit\nEEG\t\xb5V\n", "cp1252"),
+        (b"name\tunit\nEEG\t\x81\n", "latin-1"),
     ],
-    ids=["ascii", "utf8", "utf8-bom", "utf16", "latin1"],
+    ids=["ascii", "utf8", "utf8-bom", "utf16", "cp1252", "latin1"],
 )
 def test_detect_file_encoding(tmp_path, payload, expected):
     """Encoding is detected deterministically from BOM and UTF-8 validity."""
@@ -188,3 +189,19 @@ def test_drop_different_types():
     result = _drop(data, values=values_to_drop, column=column)
     for value in values_to_drop:
         assert value not in result
+
+
+@pytest.mark.parametrize("prefix", [b"", b"a\n" * 40000])
+@pytest.mark.parametrize("compressed", [False, True])
+def test_late_non_utf8(tmp_path, prefix, compressed):
+    """Read cp1252 bytes anywhere in a TSV without rewriting the file."""
+    import gzip
+
+    payload = b"label\n" + prefix + b"go \x96 stop\n"
+    fname = tmp_path / ("events.tsv.gz" if compressed else "events.tsv")
+    content = gzip.compress(payload) if compressed else payload
+    fname.write_bytes(content)
+    if compressed:
+        fname.with_suffix("").with_suffix(".json").write_text('{"Columns":["label"]}')
+    assert _from_tsv(fname)["label"][-1] == "go – stop"
+    assert fname.read_bytes() == content
