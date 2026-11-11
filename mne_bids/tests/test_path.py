@@ -2612,6 +2612,29 @@ def test_hash():
     bp3 = pickle.loads(pickle.dumps(bp1))  # test pickling
     assert bp1 == bp3
     assert hash(bp1) == hash(bp3)
+    # the state pickled by older versions only holds their 11 entities
+    old_state = dict.fromkeys(
+        (
+            "session",
+            "task",
+            "tracking_system",
+            "acquisition",
+            "run",
+            "processing",
+            "space",
+            "recording",
+            "split",
+            "description",
+        )
+    )
+    old_state.update(
+        subject="01", root=Path("foo"), suffix=None, extension=None, datatype="eeg"
+    )
+    old_state["check"] = True
+    bp_old = BIDSPath.__new__(BIDSPath)
+    bp_old.__setstate__(old_state)
+    assert bp_old == bp1
+    assert bp_old.__getstate__() == bp1.__getstate__()
     for bp_copy in (bp1.copy(), copy.copy(bp1), copy.deepcopy(bp1)):  # test copying
         assert bp_copy is not bp1
         assert bp_copy.__dict__ == bp1.__dict__

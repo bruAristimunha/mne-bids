@@ -579,6 +579,8 @@ class BIDSPath:
 
     def __setstate__(self, state):
         """Set the object state."""
+        # states pickled by older versions lack the newer entities
+        vars(self).update(_UNSET_ENTITIES)
         self.update(**state)
 
     def __hash__(self):
