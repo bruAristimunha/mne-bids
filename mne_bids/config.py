@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import functools
+from collections.abc import Mapping
 
 from bidsschematools.schema import load_schema
 from mne.io.constants import FIFF
@@ -367,8 +368,10 @@ ALLOWED_FILENAME_SUFFIX += sorted(
     {
         suffix
         for group in _SCHEMA.rules.files.raw.values()
+        if isinstance(group, Mapping)
         for rule in group.values()
-        for suffix in rule.suffixes
+        if isinstance(rule, Mapping)
+        for suffix in rule.get("suffixes", ())
     }.difference(ALLOWED_FILENAME_SUFFIX)
 )
 

@@ -38,11 +38,12 @@ Detailed list of changes
 - Add :func:`mne_bids.open_lock`, the cross-process file lock mne-bids uses for shared files such as ``participants.tsv``, so downstream writers can share it, by `Bruno Aristimunha`_ (:gh:`1675`)
 - :func:`mne_bids.read_epochs_bids` now reads epoched FIF files (``RecordingType: "epoched"``) with :func:`mne.read_epochs`, and :func:`mne_bids.read_raw_bids` points to it for such files, by `Hamza Abdelhedi`_ (:gh:`1679`)
 - :func:`mne_bids.read_raw_bids` now accepts path-like inputs (``str`` or :class:`pathlib.Path`), converting them via :func:`mne_bids.get_bids_path_from_fname`, by `Bruno Aristimunha`_ (:gh:`1695`)
-- :class:`mne_bids.BIDSPath` and :func:`mne_bids.get_entities_from_fname` now know every entity, datatype and raw-data suffix of the BIDS schema (from ``bidsschematools``; for example ``echo``, ``reconstruction``, ``tracer``, and the ``func``, ``dwi``, ``fmap``, ``perf``, ``pet``, ``mrs`` and ``micr`` datatypes), so MRI, PET, MRS and microscopy filenames can be parsed and built, and ``on_error="warn"`` keeps an entity that is not in the schema, as ``"ignore"`` does, by `Bruno Aristimunha`_.
+- :class:`mne_bids.BIDSPath` and :func:`mne_bids.get_entities_from_fname` now know every entity, datatype and raw-data suffix of the BIDS schema (from ``bidsschematools``; for example ``echo``, ``reconstruction``, ``tracer``, and the ``func``, ``dwi``, ``fmap``, ``perf``, ``pet``, ``mrs`` and ``micr`` datatypes), so the names of such MRI, PET, MRS and microscopy files can be parsed, and built when their extension is one MNE-BIDS accepts (such as ``.nii.gz`` and ``.json``); with ``check=True``, extensions such as ``.bval``, ``.bvec``, ``.ome.tif`` and ``.ome.zarr`` are still rejected, by `Bruno Aristimunha`_.
 
 🧐 API and behavior changes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+- :func:`mne_bids.get_entities_from_fname` with ``on_error="warn"`` now keeps an entity that is not in the BIDS schema, as ``"ignore"`` does, so ``BIDSPath(**get_entities_from_fname(fname, on_error="warn"))`` can raise a ``TypeError``, and :attr:`BIDSPath.entities` and :func:`mne_bids.get_entities_from_fname` now return all 35 BIDS entities, so the short keys ``rec`` and ``dir`` of a filename are returned as the ``reconstruction`` and ``direction`` entities, by `Bruno Aristimunha`_.
 - Sidecar files are now written to a temporary file and moved into place, so reading them no longer takes a file lock, and a sidecar whose content would not change is no longer rewritten, by `Hamza Abdelhedi`_ (:gh:`1680`)
 
 🛠 Requirements
