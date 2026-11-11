@@ -157,6 +157,7 @@ _READER_NAMES = {
     ".snirf": "read_raw_snirf",
     ".cdt": "read_raw_curry",
     ".mefd": "read_raw_mef",
+    ".nwb": "read_raw_nwb",
 }
 
 _EPOCH_READER_NAMES = {".set": "read_epochs_eeglab", ".fif": "read_epochs"}

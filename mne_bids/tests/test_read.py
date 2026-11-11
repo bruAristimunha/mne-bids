@@ -174,16 +174,67 @@ def test_read_raw():
         _read_raw(f)
 
 
-def test_not_implemented(tmp_path):
-    """Test the not yet implemented data formats raise an adequate error."""
-    for not_implemented_ext in [".nwb"]:
-        raw_fname = tmp_path / f"test{not_implemented_ext}"
-        with open(raw_fname, "w", encoding="utf-8"):
-            pass
-        with pytest.raises(
-            ValueError, match=("there is no IO support for this file format yet")
-        ):
-            _read_raw(raw_fname)
+def test_nwb_requires_supported_mne(tmp_path, monkeypatch):
+    """Give an upgrade message when MNE has no NWB reader."""
+    monkeypatch.delitem(_get_readers("reader"), ".nwb", raising=False)
+    with pytest.raises(ValueError, match="NWB support requires MNE-Python"):
+        _read_raw(tmp_path / "test.nwb")
+
+
+@pytest.mark.skipif(
+    not hasattr(mne.io, "read_raw_nwb"), reason="Requires MNE NWB reader"
+)
+def test_read_raw_bids_nwb(tmp_path):
+    """Read NWB samples and apply the BIDS sidecars."""
+    h5py = pytest.importorskip("h5py")
+    bp = BIDSPath(
+        subject="01",
+        task="test",
+        datatype="ieeg",
+        suffix="ieeg",
+        extension=".nwb",
+        root=tmp_path,
+    )
+    bp.mkdir()
+    data = np.arange(200).reshape(100, 2)
+    with h5py.File(bp.fpath, "w") as f:
+        f["session_start_time"] = "2020-01-01T00:00:00Z"
+        table = f.create_group("general/extracellular_ephys/electrodes")
+        table["id"] = [10, 20]
+        es = f.create_group("acquisition/signal")
+        es.attrs["neurodata_type"] = "ElectricalSeries"
+        es.create_dataset("data", data=data).attrs.update(unit="volts", conversion=1e-6)
+        es.create_dataset("starting_time", data=0.0).attrs["rate"] = 100.0
+        es.create_dataset("electrodes", data=[0, 1]).attrs["table"] = table.ref
+    bp.copy().update(suffix="channels", extension=".tsv").fpath.write_text(
+        "name\ttype\tunits\tstatus\nA1\tECOG\tV\tgood\nA2\tECOG\tV\tbad\n"
+    )
+    bp.copy().update(suffix="events", extension=".tsv").fpath.write_text(
+        "onset\tduration\ttrial_type\n0.1\t0.2\tstimulus\n"
+    )
+    bp.copy().update(extension=".json").fpath.write_text(
+        '{"TaskName":"test", "PowerLineFrequency":50}'
+    )
+    bp.copy().update(
+        task=None, suffix="electrodes", extension=".tsv", space="ACPC"
+    ).fpath.write_text("name\tx\ty\tz\tsize\nA1\t10\t20\t30\t1\nA2\t20\t30\t40\t1\n")
+    bp.copy().update(
+        task=None, suffix="coordsystem", extension=".json", space="ACPC"
+    ).fpath.write_text('{"iEEGCoordinateSystem":"ACPC", "iEEGCoordinateUnits":"mm"}')
+    (tmp_path / "participants.tsv").write_text("participant_id\tsex\nsub-01\tF\n")
+    (tmp_path / "dataset_description.json").write_text(
+        '{"Name":"test", "BIDSVersion":"1.10.1"}'
+    )
+    raw = read_raw_bids(bp, on_ch_mismatch="rename")
+    np.testing.assert_allclose(raw.get_data(), data.T * 1e-6)
+    assert raw.ch_names == ["A1", "A2"]
+    assert raw.get_channel_types() == ["ecog", "ecog"]
+    assert raw.info["bads"] == ["A2"]
+    assert raw.info["line_freq"] == 50
+    assert raw.info["subject_info"]["sex"] == 2
+    assert list(raw.annotations.description) == ["stimulus"]
+    np.testing.assert_allclose(raw.annotations.onset, [0.1])
+    np.testing.assert_allclose(raw.info["chs"][0]["loc"][:3], [0.01, 0.02, 0.03])
 
 
 def test_mefd_requires_supported_mne(tmp_path, monkeypatch):

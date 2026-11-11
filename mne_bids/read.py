@@ -109,13 +109,13 @@ def _read_raw(
         raw_path = Path(raw_path)
         raw = reader[ext](raw_path, verbose=verbose, **kwargs)
 
-    # NWB is allowed, but not yet implemented
     elif ext == ".nwb":
-        raise ValueError(
-            f'Got "{ext}" as extension. This is an allowed '
-            f"extension but there is no IO support for this "
-            f"file format yet."
-        )
+        if ext not in reader:
+            raise ValueError(
+                "NWB support requires MNE-Python with read_raw_nwb. "
+                "Please upgrade MNE-Python to use this format."
+            )
+        raw = reader[ext](Path(raw_path), verbose=verbose, **kwargs)
 
     # No supported data found ...
     # ---------------------------
