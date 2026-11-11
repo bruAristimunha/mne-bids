@@ -1709,6 +1709,21 @@ def test_filter_fnames_literal_extension(extension):
     assert _filter_fnames([valid, invalid], extension=extension) == [valid]
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "hf://datasets/org/repo/sub-01/eeg/sub-01_task-x_eeg.edf",
+        "s3://openneuro.org/ds000248/sub-01/meg/sub-01_task-x_meg.fif",
+        "zip://sub-01/eeg/sub-01_task-x_eeg.edf::/tmp/x.zip",
+    ],
+)
+def test_filter_fnames_keeps_urls(url):
+    """Names are returned as they were given, so URLs are not collapsed."""
+    assert _filter_fnames([url]) == [url]
+    # a Path is never equal to a str, so this also checks that a Path stays one
+    assert _filter_fnames([Path(url)]) == [Path(url)]
+
+
 def test_match_basic(bids_root):
     """Test retrieval of matching basenames."""
     bids_path_01 = BIDSPath(root=bids_root)

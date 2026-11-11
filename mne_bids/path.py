@@ -2764,7 +2764,8 @@ def _filter_fnames(
 
     Returns
     -------
-    list of pathlib.Path
+    list of pathlib.Path | list of str
+        The matching items of ``fnames``, unchanged, sorted by their str form.
     """
     subject = _ensure_tuple(subject)
     session = _ensure_tuple(session)
@@ -2830,9 +2831,6 @@ def _filter_fnames(
         + ext_str
     )
 
-    # Convert to str so we can apply the regexp ...
-    fnames = [str(f) for f in fnames]
-
     # The regexp ends with the extension alternatives followed by ``$``, so
     # every name it can match ends with one of their literal tails. Rejecting
     # the rest with str.endswith first is exactly equivalent and much cheaper
@@ -2840,14 +2838,13 @@ def _filter_fnames(
     # candidate (28x on a 4800-file tree).
     tails = tuple(_literal_suffix(ext) for ext in extension)
     if tails and all(tails):
-        fnames = [fname for fname in fnames if fname.endswith(tails)]
+        fnames = [fname for fname in fnames if str(fname).endswith(tails)]
 
     # https://stackoverflow.com/a/51246151/1944216
-    fnames_filtered = sorted(filter(re.compile(regexp).match, fnames))
-
-    # ... and return Paths.
-    fnames_filtered = [Path(f) for f in fnames_filtered]
-    return fnames_filtered
+    # Match and sort on the str form, but return the names as they were given:
+    # ``Path`` would turn a URL such as ``hf://...`` into ``hf:/...``.
+    match = re.compile(regexp).match
+    return sorted((fname for fname in fnames if match(str(fname))), key=str)
 
 
 def find_matching_paths(
