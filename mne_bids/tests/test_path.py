@@ -1852,9 +1852,16 @@ def test_filter_fnames_mri():
 
 @pytest.mark.parametrize("extension", [None, ".edf"])
 @pytest.mark.parametrize("cls", [str, Path])
-def test_filter_fnames_chained_url(cls, extension):
-    """Match a chained fsspec URL by its part before "::" and return it as given."""
-    url = cls("zip://sub-01/eeg/sub-01_task-x_eeg.edf::/tmp/x.zip")
+@pytest.mark.parametrize(
+    "url",
+    [
+        "zip://sub-01/eeg/sub-01_task-x_eeg.edf::/tmp/x.zip",
+        "simplecache::s3://bucket/sub-01/eeg/sub-01_task-x_eeg.edf",
+    ],
+)
+def test_filter_fnames_chained_url(url, cls, extension):
+    """Match a chained fsspec URL by its first part with a "/", return it as given."""
+    url = cls(url)
     assert _filter_fnames([url], extension=extension) == [url]
     assert _filter_fnames([url], task="y", extension=extension) == []
 

@@ -2916,9 +2916,16 @@ def _filter_fnames(fnames, *, suffix=None, extension=None, **entities):
 
     regexp = leading_path_str + entities_str + suffix_str + ext_str
 
-    # Match a chained fsspec URL (``zip://sub-01/.../x_eeg.edf::/tmp/x.zip``) by
-    # its part before "::", but return every name as given (str or Path).
-    names = [(str(fname).partition("::")[0], fname) for fname in fnames]
+    # Match a chained fsspec URL by its first part with a "/", which is the inner
+    # path of ``zip://sub-01/...::/tmp/x.zip`` and the URL of
+    # ``simplecache::s3://bucket/sub-01/...``, but return every name as given.
+    names = [
+        (
+            next((part for part in str(fname).split("::") if "/" in part), str(fname)),
+            fname,
+        )
+        for fname in fnames
+    ]
 
     # The regexp ends with the extension alternatives followed by ``$``, so
     # every name it can match ends with one of their literal tails. Rejecting
