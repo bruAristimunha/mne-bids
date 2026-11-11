@@ -826,19 +826,7 @@ def test_get_entities_from_fname(fname):
     assert params["task"] == "test"
     assert params["description"] == "filtered"
     assert params["split"] == "1"
-    assert list(params.keys()) == [
-        "subject",
-        "session",
-        "task",
-        "tracking_system",
-        "acquisition",
-        "run",
-        "processing",
-        "space",
-        "recording",
-        "split",
-        "description",
-    ]
+    assert list(params.keys()) == list(ALLOWED_PATH_ENTITIES_SHORT.values())
 
 
 @pytest.mark.parametrize(
@@ -864,7 +852,88 @@ def test_get_entities_from_fname_errors(fname):
     else:
         params = get_entities_from_fname(fname, on_error="raise")
 
-    expected_keys = [
+    expected_keys = list(ALLOWED_PATH_ENTITIES_SHORT.values())
+
+    assert params["subject"] == "01"
+    assert params["session"] == "02"
+    assert params["run"] == "3"
+    assert params["task"] == "test"
+    assert params["split"] == "01"
+    if "foo" in fname:
+        assert params["foo"] == "tfr"
+        expected_keys.append("foo")
+    assert list(params.keys()) == expected_keys
+
+
+@pytest.mark.parametrize(
+    "fname, expected",
+    [
+        (
+            "sub-01_ses-01_task-rest_echo-1_part-mag_bold.nii.gz",
+            {"echo": "1", "part": "mag"},
+        ),
+        ("sub-01_rec-norm_T1w.nii.gz", {"reconstruction": "norm"}),
+        ("sub-01_dir-AP_dwi.nii.gz", {"direction": "AP"}),
+        (
+            "sub-01_trc-FDG_rec-acdyn_pet.nii.gz",
+            {"tracer": "FDG", "reconstruction": "acdyn"},
+        ),
+        (
+            "sub-01_acq-press_voi-pcc_svs.nii.gz",
+            {"acquisition": "press", "volume": "pcc"},
+        ),
+    ],
+)
+def test_mri_entities(fname, expected):
+    """Test MRI, PET and MRS entities are parsed and written back."""
+    bids_path = get_bids_path_from_fname(fname, check=False)
+    for key, val in expected.items():
+        assert getattr(bids_path, key) == val
+    assert bids_path.basename == fname
+    assert bids_path.extension == ".nii.gz"
+
+
+@pytest.mark.parametrize(
+    "datatype, suffix",
+    [
+        ("func", "bold"),
+        ("dwi", "dwi"),
+        ("fmap", "epi"),
+        ("pet", "pet"),
+        ("perf", "asl"),
+    ],
+)
+def test_mri_datatypes(datatype, suffix):
+    """Test MRI and PET datatypes and suffixes pass the BIDS checks."""
+    bids_path = BIDSPath(
+        subject="01", datatype=datatype, suffix=suffix, extension=".nii.gz"
+    )
+    assert bids_path.check
+    assert str(bids_path) == f"sub-01/{datatype}/sub-01_{suffix}.nii.gz"
+
+
+def test_unknown_entity_still_parsed():
+    """Test an entity that is not in the BIDS schema is kept with a warning."""
+    with pytest.warns(RuntimeWarning, match='Unexpected entity "foo"'):
+        params = get_entities_from_fname("sub-01_foo-bar_eeg.edf", on_error="warn")
+    assert params["subject"] == "01"
+    assert params["foo"] == "bar"
+
+
+def test_entity_order():
+    """Test entities follow the schema order, except split before desc."""
+    from mne_bids._schema import ENTITIES as SCHEMA_ENTITIES
+
+    long_names = list(ALLOWED_PATH_ENTITIES_SHORT.values())
+    # MNE's split_naming="bids" puts _split-XX right before the suffix, so split
+    # stays last before desc, as it was before the schema entities were added
+    assert [key for key in ALLOWED_PATH_ENTITIES_SHORT if key != "split"] == [
+        key for key in SCHEMA_ENTITIES if key != "split"
+    ]
+    assert long_names[-2:] == ["split", "description"]
+    # the entities MNE-BIDS had before keep their relative order, so every
+    # filename it accepted before is still accepted
+    old_order = [
         "subject",
         "session",
         "task",
@@ -877,16 +946,44 @@ def test_get_entities_from_fname_errors(fname):
         "split",
         "description",
     ]
+    assert [name for name in long_names if name in old_order] == old_order
+    fname = (
+        "sub-01_ses-02_task-t_tracksys-omc_acq-a_run-3_proc-p_space-CTF"
+        "_recording-r_split-01_desc-d_meg.fif"
+    )
+    bids_path = get_bids_path_from_fname(fname, check=False)
+    assert bids_path.basename == fname
+    assert bids_path.split == "01"
 
-    assert params["subject"] == "01"
-    assert params["session"] == "02"
-    assert params["run"] == "3"
-    assert params["task"] == "test"
-    assert params["split"] == "01"
-    if "foo" in fname:
-        assert params["foo"] == "tfr"
-        expected_keys.append("foo")
-    assert list(params.keys()) == expected_keys
+    # every entity is a keyword argument and a property, written in this order
+    bids_path = BIDSPath(
+        **{name: "1" for name in long_names},
+        suffix="T1w",
+        extension=".nii.gz",
+        check=False,  # space needs a datatype and a known value
+    )
+    fname = "_".join(f"{key}-1" for key in ALLOWED_PATH_ENTITIES_SHORT) + "_T1w.nii.gz"
+    assert bids_path.basename == fname
+    assert get_entities_from_fname(fname) == bids_path.entities
+    for name in long_names:
+        assert isinstance(vars(BIDSPath)[name], property)
+        assert getattr(bids_path, name) == "1"
+        assert vars(BIDSPath)[name].__doc__
+
+
+def test_schema_entity_validation():
+    """Test the new entities are validated like the existing ones."""
+    bids_path = BIDSPath(subject="01", echo=2, reconstruction="norm")
+    assert bids_path.echo == "2"
+    assert bids_path.entities["echo"] == "2"
+    with pytest.raises(ValueError, match="echo is not an index"):
+        bids_path.update(echo="a")
+    assert bids_path.echo == "2"
+    with pytest.raises(TypeError, match="reconstruction must be an instance"):
+        BIDSPath(subject="01", reconstruction=1)
+    with pytest.raises(ValueError, match="Unallowed"):
+        BIDSPath(subject="01", reconstruction="a_b")
+    assert BIDSPath(echo=1).basename == "echo-1"
 
 
 @pytest.mark.parametrize(

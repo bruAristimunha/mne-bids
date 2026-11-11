@@ -38,6 +38,7 @@ Detailed list of changes
 - Add :func:`mne_bids.open_lock`, the cross-process file lock mne-bids uses for shared files such as ``participants.tsv``, so downstream writers can share it, by `Bruno Aristimunha`_ (:gh:`1675`)
 - :func:`mne_bids.read_epochs_bids` now reads epoched FIF files (``RecordingType: "epoched"``) with :func:`mne.read_epochs`, and :func:`mne_bids.read_raw_bids` points to it for such files, by `Hamza Abdelhedi`_ (:gh:`1679`)
 - :func:`mne_bids.read_raw_bids` now accepts path-like inputs (``str`` or :class:`pathlib.Path`), converting them via :func:`mne_bids.get_bids_path_from_fname`, by `Bruno Aristimunha`_ (:gh:`1695`)
+- :class:`mne_bids.BIDSPath` and :func:`mne_bids.get_entities_from_fname` now know every entity, datatype and raw-data suffix of the BIDS 1.11.2 schema (for example ``echo``, ``reconstruction``, ``tracer``, and the ``func``, ``dwi``, ``fmap``, ``perf``, ``pet``, ``mrs`` and ``micr`` datatypes), so MRI, PET, MRS and microscopy filenames can be parsed and built, and ``on_error="warn"`` keeps an entity that is not in the schema, as ``"ignore"`` does, by `Bruno Aristimunha`_.
 
 🧐 API and behavior changes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^

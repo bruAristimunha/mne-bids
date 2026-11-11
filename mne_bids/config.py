@@ -7,6 +7,8 @@ import functools
 
 from mne.io.constants import FIFF
 
+from mne_bids._schema import DATATYPES, ENTITIES, ENTITY_FORMATS, RAW_SUFFIXES
+
 BIDS_VERSION = "1.9.0"
 
 PYBV_VERSION = "0.7.3"
@@ -17,7 +19,9 @@ DOI = """https://doi.org/10.21105/joss.01896"""
 
 EPHY_ALLOWED_DATATYPES = ["eeg", "emg", "ieeg", "meg", "nirs"]
 
-ALLOWED_DATATYPES = EPHY_ALLOWED_DATATYPES + ["anat", "beh", "motion"]
+ALLOWED_DATATYPES = EPHY_ALLOWED_DATATYPES + [
+    datatype for datatype in DATATYPES if datatype not in EPHY_ALLOWED_DATATYPES
+]
 
 MEG_CONVERT_FORMATS = ["FIF", "auto"]
 EEG_CONVERT_FORMATS = ["BrainVision", "EDF", "BDF", "EEGLAB", "auto"]
@@ -356,6 +360,9 @@ ALLOWED_FILENAME_SUFFIX = [
     "stim",
     "motion",
 ]
+ALLOWED_FILENAME_SUFFIX += [
+    suffix for suffix in RAW_SUFFIXES if suffix not in ALLOWED_FILENAME_SUFFIX
+]
 
 # converts suffix to known path modalities
 SUFFIX_TO_DATATYPE = {
@@ -379,35 +386,16 @@ ALLOWED_FILENAME_EXTENSIONS = (
     + [".mrk"]  # KIT/Yokogawa/Ricoh marker coil
 )
 
-# allowed BIDSPath entities
-ALLOWED_PATH_ENTITIES = (
-    "subject",
-    "session",
-    "task",
-    "run",
-    "processing",
-    "recording",
-    "space",
-    "acquisition",
-    "split",
-    "description",
-    "suffix",
-    "extension",
-    "tracking_system",
-)
+# allowed BIDSPath entities: short name -> long name, in filename order. That is
+# the schema order, except that split comes right before desc as MNE's
+# split_naming="bids" puts it before the suffix, and tracksys keeps its long name
 ALLOWED_PATH_ENTITIES_SHORT = {
-    "sub": "subject",
-    "ses": "session",
-    "task": "task",
+    **{key: val for key, val in ENTITIES.items() if key not in ("split", "desc")},
     "tracksys": "tracking_system",
-    "acq": "acquisition",
-    "run": "run",
-    "proc": "processing",
-    "space": "space",
-    "recording": "recording",
     "split": "split",
     "desc": "description",
 }
+ALLOWED_PATH_ENTITIES = (*ALLOWED_PATH_ENTITIES_SHORT.values(), "suffix", "extension")
 
 # Annotations to never remove during reading or writing
 ANNOTATIONS_TO_KEEP = ("BAD_ACQ_SKIP",)
@@ -501,19 +489,9 @@ ALLOWED_SPACES["motion"] = None
 
 # See: https://bids-specification.readthedocs.io/en/latest/appendices/entity-table.html#encephalography-eeg-ieeg-and-meg  # noqa: E501
 ENTITY_VALUE_TYPE = {
-    "subject": "label",
-    "session": "label",
-    "task": "label",
-    "run": "index",
-    "processing": "label",
-    "recording": "label",
-    "space": "label",
-    "acquisition": "label",
-    "split": "index",
-    "description": "label",
+    **{ALLOWED_PATH_ENTITIES_SHORT[key]: val for key, val in ENTITY_FORMATS.items()},
     "suffix": "label",
     "extension": "label",
-    "tracking_system": "label",
 }
 
 # mapping from supported BIDs coordinate frames -> MNE

@@ -15,6 +15,7 @@ import shutil as sh
 from contextlib import contextmanager
 from datetime import datetime
 from io import StringIO
+from operator import attrgetter
 from os import path as op
 from pathlib import Path
 from textwrap import indent
@@ -240,6 +241,9 @@ def _find_matched_empty_room(bids_path):
 LONG_TO_SHORT_ENTITY = {
     long: short for short, long in ALLOWED_PATH_ENTITIES_SHORT.items()
 }
+# and set or read the values of all entities of a BIDSPath at once
+_UNSET_ENTITIES = dict.fromkeys(f"_{key}" for key in LONG_TO_SHORT_ENTITY)
+_get_entity_values = attrgetter(*_UNSET_ENTITIES)
 
 
 class BIDSPath:
@@ -313,14 +317,63 @@ class BIDSPath:
         ``'ieeg'``.
     check : bool
         If ``True``, enforces BIDS conformity. Defaults to ``True``.
+    template : str | None
+        The template. Corresponds to ``tpl``.
+    cohort : str | None
+        The cohort of a template. Corresponds to ``cohort``.
+    sample : str | None
+        The sample, for microscopy data. Corresponds to ``sample``.
+    nucleus : str | None
+        The nucleus, for MR spectroscopy data. Corresponds to ``nuc``.
+    volume : str | None
+        The volume of interest, for MR spectroscopy data. Corresponds to
+        ``voi``.
+    ceagent : str | None
+        The contrast enhancing agent. Corresponds to ``ce``.
+    tracer : str | None
+        The PET tracer. Corresponds to ``trc``.
+    stain : str | None
+        The stain, for microscopy data. Corresponds to ``stain``.
+    reconstruction : str | None
+        The image reconstruction. Corresponds to ``rec``.
+    direction : str | None
+        The phase-encoding direction. Corresponds to ``dir``.
+    modality : str | None
+        The modality a defacing mask corresponds to. Corresponds to ``mod``.
+    echo : int | None
+        The echo index. Corresponds to ``echo``.
+    flip : int | None
+        The flip angle index. Corresponds to ``flip``.
+    inversion : int | None
+        The inversion time index. Corresponds to ``inv``.
+    mtransfer : str | None
+        The magnetization transfer state (``on`` or ``off``). Corresponds
+        to ``mt``.
+    part : str | None
+        The component of complex data (e.g., ``mag`` or ``phase``).
+        Corresponds to ``part``.
+    hemisphere : str | None
+        The hemisphere (``L`` or ``R``). Corresponds to ``hemi``.
+    chunk : int | None
+        The chunk index, for microscopy data. Corresponds to ``chunk``.
+    atlas : str | None
+        The atlas. Corresponds to ``atlas``.
+    segmentation : str | None
+        The segmentation. Corresponds to ``seg``.
+    scale : str | None
+        The scale. Corresponds to ``scale``.
+    resolution : str | None
+        The resolution of regularly sampled data. Corresponds to ``res``.
+    density : str | None
+        The density of surface data. Corresponds to ``den``.
+    label : str | None
+        The tissue type or anatomical structure. Corresponds to ``label``.
 
     Attributes
     ----------
     entities : dict
-        A dictionary of the BIDS entities and their values:
-        ``subject``, ``session``, ``task``, ``acquisition``,
-        ``run``, ``processing``, ``space``, ``recording``,
-        ``split``, ``description``, ``suffix``, and ``extension``.
+        A dictionary of all BIDS entities and their values, in the order they
+        appear in a filename.
     datatype : str | None
         The data type, i.e., one of ``'meg'``, ``'eeg'``, ``'ieeg'``,
         ``'anat'``.
@@ -346,11 +399,10 @@ class BIDSPath:
     one can set ``check=False``, and pass ``suffix='dataset_description'``
     and ``extension='.json'``.
 
-    ``BIDSPath`` can also be used to represent file and folder names of data
-    types that are not yet supported through MNE-BIDS, but are recognized by
-    BIDS. For example, one can set ``datatype`` to ``dwi`` or ``func`` and
-    pass ``check=False`` to represent diffusion-weighted imaging and
-    functional MRI paths.
+    ``BIDSPath`` can also represent the file and folder names of BIDS data types
+    that MNE-BIDS cannot read or write, such as ``func``, ``dwi`` or ``pet``, with
+    any entity of the BIDS schema. The parameters from ``template`` to ``label``
+    were added in version 0.21.
 
     Examples
     --------
@@ -418,7 +470,58 @@ class BIDSPath:
         extension=None,
         datatype=None,
         check=True,
+        *,
+        template=None,
+        cohort=None,
+        sample=None,
+        nucleus=None,
+        volume=None,
+        ceagent=None,
+        tracer=None,
+        stain=None,
+        reconstruction=None,
+        direction=None,
+        modality=None,
+        echo=None,
+        flip=None,
+        inversion=None,
+        mtransfer=None,
+        part=None,
+        hemisphere=None,
+        chunk=None,
+        atlas=None,
+        segmentation=None,
+        scale=None,
+        resolution=None,
+        density=None,
+        label=None,
     ):
+        entities = dict(
+            template=template,
+            cohort=cohort,
+            sample=sample,
+            nucleus=nucleus,
+            volume=volume,
+            ceagent=ceagent,
+            tracer=tracer,
+            stain=stain,
+            reconstruction=reconstruction,
+            direction=direction,
+            modality=modality,
+            echo=echo,
+            flip=flip,
+            inversion=inversion,
+            mtransfer=mtransfer,
+            part=part,
+            hemisphere=hemisphere,
+            chunk=chunk,
+            atlas=atlas,
+            segmentation=segmentation,
+            scale=scale,
+            resolution=resolution,
+            density=density,
+            label=label,
+        )
         if all(
             ii is None
             for ii in [
@@ -434,10 +537,13 @@ class BIDSPath:
                 root,
                 suffix,
                 extension,
+                *entities.values(),
             ]
         ):
             raise ValueError("At least one parameter must be given.")
 
+        # unset entities need no validation, so ``update`` only gets the given ones
+        vars(self).update(_UNSET_ENTITIES)
         self.update(
             subject=subject,
             session=session,
@@ -455,24 +561,13 @@ class BIDSPath:
             suffix=suffix,
             extension=extension,
             check=check,
+            **{key: val for key, val in entities.items() if val is not None},
         )
 
     @property
     def entities(self):
         """Return dictionary of the BIDS entities."""
-        return {
-            "subject": self.subject,
-            "session": self.session,
-            "task": self.task,
-            "tracking_system": self.tracking_system,
-            "acquisition": self.acquisition,
-            "run": self.run,
-            "processing": self.processing,
-            "space": self.space,
-            "recording": self.recording,
-            "split": self.split,
-            "description": self.description,
-        }
+        return dict(zip(LONG_TO_SHORT_ENTITY, _get_entity_values(self)))
 
     def __getstate__(self):
         """Get the object state."""
@@ -500,11 +595,13 @@ class BIDSPath:
     @property
     def basename(self):
         """Path basename."""
-        basename = []
-        for key, val in self.entities.items():
-            if val is not None and key != "datatype":
-                # convert certain keys to shorthand
-                basename.append(f"{LONG_TO_SHORT_ENTITY[key]}-{val}")
+        basename = [
+            f"{short}-{val}"
+            for short, val in zip(
+                LONG_TO_SHORT_ENTITY.values(), _get_entity_values(self)
+            )
+            if val is not None
+        ]
 
         if self.suffix is not None:
             if self.extension is not None:
@@ -1024,8 +1121,9 @@ class BIDSPath:
         **kwargs : dict
             It can contain updates for valid BIDSPath entities:
             'subject', 'session', 'task', 'acquisition', 'processing', 'run',
-            'recording', 'space', 'suffix', 'split', 'extension',
-            or updates for 'root' or 'datatype'.
+            'recording', 'space', 'suffix', 'split', 'extension', or any other
+            entity of the BIDS schema by its long name (see
+            :class:`mne_bids.BIDSPath`), or updates for 'root' or 'datatype'.
 
         Returns
         -------
@@ -1158,8 +1256,7 @@ class BIDSPath:
                 "BIDSPath.update()."
             )
         kwargs = {
-            f"{key}s": [val] if val is not None else val
-            for key, val in self.entities.items()
+            f"{key}s": [val] for key, val in self.entities.items() if val is not None
         }
         kwargs.update(
             root=self.root,
@@ -1426,6 +1523,22 @@ class BIDSPath:
             path = None
 
         return path
+
+
+# A property for each entity without a hand-written one above (the BIDS schema
+# entities that MNE-BIDS added later), validated like the others by ``update``
+for _short, _long in ALLOWED_PATH_ENTITIES_SHORT.items():
+    if _long not in vars(BIDSPath):
+        setattr(
+            BIDSPath,
+            _long,
+            property(
+                attrgetter(f"_{_long}"),
+                lambda self, value, key=_long: self.update(**{key: value}),
+                doc=f"The ``{_short}`` entity.",
+            ),
+        )
+del _short, _long
 
 
 def _get_matching_bidspaths_from_filesystem(bids_path):
@@ -1881,18 +1994,9 @@ def get_entities_from_fname(fname, on_error="raise", *, verbose=None):
     Examples
     --------
     >>> fname = 'sub-01_ses-exp_run-02_meg.fif'
-    >>> get_entities_from_fname(fname)
-    {'subject': '01', \
-'session': 'exp', \
-'task': None, \
-'tracking_system': None, \
-'acquisition': None, \
-'run': '02', \
-'processing': None, \
-'space': None, \
-'recording': None, \
-'split': None, \
-'description': None}
+    >>> entities = get_entities_from_fname(fname)
+    >>> entities['subject'], entities['session'], entities['run'], entities['task']
+    ('01', 'exp', '02', None)
     """
     if on_error not in ("warn", "raise", "ignore", "autofix"):
         raise ValueError(
@@ -1954,17 +2058,16 @@ def get_entities_from_fname(fname, on_error="raise", *, verbose=None):
                 msg = f'Unexpected entity "{key}" found in filename "{fname}"'
                 if on_error == "raise":
                     raise KeyError(msg)
-                else:
-                    warn(msg)
-                    continue
-            if fname_vals.index(key) < idx_key:
+                warn(msg)  # and keep the entity, as on_error="ignore" does
+            elif fname_vals.index(key) < idx_key:
                 msg = (
                     f"Entities in filename not ordered correctly."
                     f' "{key}" should have occurred earlier in the '
                     f'filename "{fname}"'
                 )
                 raise ValueError(msg)
-            idx_key = fname_vals.index(key)
+            else:
+                idx_key = fname_vals.index(key)
 
         key_short_hand = ALLOWED_PATH_ENTITIES_SHORT.get(key, key)
         params[key_short_hand] = value
