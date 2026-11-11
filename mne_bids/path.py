@@ -2164,12 +2164,12 @@ def find_inherited_sidecars(
     Parameters
     ----------
     bids_path : BIDSPath
-        The recording. Its ``root`` must be set.
+        The recording. Its ``root`` and ``datatype`` must be set.
     suffix : str | None
         The suffix of the sidecar files, e.g. ``'eeg'``. If ``None``, use
         ``bids_path.suffix``.
     extension : str
-        The extension of the sidecar files.
+        The extension of the sidecar files, with or without the leading dot.
     candidates : iterable of path-like | None
         The files to choose from, e.g. the files of an already listed dataset,
         given under ``bids_path.root`` as it is spelled there. If ``None``,
@@ -2177,10 +2177,13 @@ def find_inherited_sidecars(
 
     Returns
     -------
-    sidecars : list of Path
+    sidecars : list of path-like
         The sidecar files that apply, ordered from the dataset root down. BIDS
         allows one per directory; if a directory has more, those with fewer
-        entities come first.
+        entities come first. Files found by searching the directories are
+        :class:`~pathlib.Path` objects; files chosen from ``candidates`` are
+        returned as given there, so a URL string such as ``"hf://..."`` stays
+        as it is.
 
     Notes
     -----
@@ -2190,6 +2193,13 @@ def find_inherited_sidecars(
         raise ValueError(
             "The root of the BIDSPath must be set to find inherited sidecar files."
         )
+    if bids_path.datatype is None:
+        raise ValueError(
+            "The datatype of the BIDSPath must be set to find inherited sidecar "
+            "files, as the recording's directory depends on it."
+        )
+    if not extension.startswith("."):
+        extension = f".{extension}"
     root = Path(bids_path.root)
     levels = [root]
     for part in bids_path.directory.relative_to(root).parts:
@@ -2197,7 +2207,7 @@ def find_inherited_sidecars(
     name = f"{suffix or bids_path.suffix}{extension}"
     if candidates is None:
         candidates = [
-            fname
+            Path(fname)
             for level in levels
             for fname in _sidecar_glob(
                 os.path.join(glob.escape(str(level)), f"*{name}")
@@ -2205,16 +2215,20 @@ def find_inherited_sidecars(
         ]
 
     sidecars = []
-    for fname in map(Path, candidates):
-        if fname.parent not in levels:
+    for fname in candidates:
+        if not os.fspath(fname).endswith(name):  # cheap test before Path
             continue
-        if fname.name != name and not fname.name.endswith(f"_{name}"):
+        path = Path(fname)
+        if path.parent not in levels:
             continue
-        entities = get_entities_from_fname(fname, on_error="ignore")
+        if path.name != name and not path.name.endswith(f"_{name}"):
+            continue
+        entities = get_entities_from_fname(path, on_error="ignore")
         entities = {key: val for key, val in entities.items() if val is not None}
         if entities.items() <= bids_path.entities.items():
-            sidecars.append((levels.index(fname.parent), len(entities), fname))
-    return [fname for *_, fname in sorted(sidecars)]
+            sidecars.append((levels.index(path.parent), len(entities), path, fname))
+    # sort on the Path, as a str and a Path cannot be compared
+    return [fname for *_, fname in sorted(sidecars, key=lambda item: item[:3])]
 
 
 _ext_map = {  # these sidecar files should only ever have these extensions

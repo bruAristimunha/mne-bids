@@ -2667,9 +2667,12 @@ def test_read_raw_bids_non_object_json_sidecar(tmp_path, suffix):
     assert len(raw.annotations) > 0
 
 
-@pytest.mark.parametrize("root_name", ["tiny_bids", "tiny_bids[1]"])
-def test_read_raw_bids_inherited_sidecar(tmp_path, root_name):
-    """A key only in a root-level sidecar is inherited by the recording."""
+@pytest.mark.parametrize(
+    "root_name, line_freq",
+    [("tiny_bids", None), ("tiny_bids[1]", None), ("tiny_bids", 50)],
+)
+def test_read_raw_bids_inherited_sidecar(tmp_path, root_name, line_freq):
+    """A key only in a root-level sidecar is inherited, a lower one overrides."""
     bids_root = tmp_path / root_name  # "[1]" is glob syntax
     sh.copytree(tiny_bids_root, bids_root)
     _write_json(bids_root / "task-rest_eeg.json", {"PowerLineFrequency": 60})
@@ -2677,9 +2680,11 @@ def test_read_raw_bids_inherited_sidecar(tmp_path, root_name):
         bids_root / "sub-01" / "ses-eeg" / "eeg" / "sub-01_ses-eeg_task-rest_eeg.json"
     )
     sidecar = json.loads(eeg_json.read_text(encoding="utf-8"))
-    del sidecar["PowerLineFrequency"]
+    sidecar["PowerLineFrequency"] = line_freq
+    if line_freq is None:
+        del sidecar["PowerLineFrequency"]
     _write_json(eeg_json, sidecar, overwrite=True)
     bids_path = BIDSPath(
         subject="01", session="eeg", task="rest", datatype="eeg", root=bids_root
     )
-    assert read_raw_bids(bids_path).info["line_freq"] == 60
+    assert read_raw_bids(bids_path).info["line_freq"] == (line_freq or 60)

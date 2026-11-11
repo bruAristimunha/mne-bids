@@ -1075,15 +1075,32 @@ def test_find_inherited_sidecars(tmp_path, monkeypatch, root_name):
     )
     expected = [root_json, subject_json]
     assert find_inherited_sidecars(bids_path) == expected
+    assert find_inherited_sidecars(bids_path, extension="json") == expected
     with _share_dir_listings():  # as in read_raw_bids
         assert find_inherited_sidecars(bids_path) == expected
-    candidates = [str(fname) for fname in (subject_json, acq_json, root_json)]
+    candidates = [subject_json, acq_json, root_json]
     assert find_inherited_sidecars(bids_path, candidates=candidates) == expected
+    candidates = [str(fname) for fname in candidates]  # returned as given
+    found = find_inherited_sidecars(bids_path, candidates=candidates)
+    assert found == [str(fname) for fname in expected]
+    with pytest.raises(ValueError, match="datatype of the BIDSPath must be set"):
+        find_inherited_sidecars(bids_path.copy().update(datatype=None))
     # a relative root, with directory listings shared as in read_raw_bids
     monkeypatch.chdir(root)
     with _share_dir_listings():
         relative = find_inherited_sidecars(bids_path.copy().update(root="."))
     assert relative == [fname.relative_to(root) for fname in expected]
+
+
+@pytest.mark.parametrize("root", ["hf://user/ds", "s3://bucket/ds"])
+def test_find_inherited_sidecars_urls(root):
+    """Candidate URLs are returned as given, with their double slash."""
+    expected = [f"{root}/task-rest_eeg.json", f"{root}/sub-01/eeg/sub-01_eeg.json"]
+    candidates = [f"{root}/sub-01/eeg/sub-01_eeg.edf", *expected[::-1]]
+    bids_path = BIDSPath(
+        subject="01", task="rest", datatype="eeg", suffix="eeg", root=root
+    )
+    assert find_inherited_sidecars(bids_path, candidates=candidates) == expected
 
 
 def test_find_matching_sidecar_basic(bids_root, tmp_path, path_counter, fast_sidecar):
