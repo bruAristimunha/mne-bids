@@ -7,7 +7,7 @@ import functools
 
 from mne.io.constants import FIFF
 
-from mne_bids._schema import DATATYPES, ENTITIES, ENTITY_FORMATS, RAW_SUFFIXES
+from mne_bids._schema import ENTITIES, ENTITY_FORMATS, RAW_SUFFIXES
 
 BIDS_VERSION = "1.9.0"
 
@@ -19,9 +19,7 @@ DOI = """https://doi.org/10.21105/joss.01896"""
 
 EPHY_ALLOWED_DATATYPES = ["eeg", "emg", "ieeg", "meg", "nirs"]
 
-ALLOWED_DATATYPES = EPHY_ALLOWED_DATATYPES + [
-    datatype for datatype in DATATYPES if datatype not in EPHY_ALLOWED_DATATYPES
-]
+ALLOWED_DATATYPES = EPHY_ALLOWED_DATATYPES + ["anat", "beh", "motion"]
 
 MEG_CONVERT_FORMATS = ["FIF", "auto"]
 EEG_CONVERT_FORMATS = ["BrainVision", "EDF", "BDF", "EEGLAB", "auto"]

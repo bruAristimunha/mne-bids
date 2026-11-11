@@ -33,7 +33,7 @@ from mne_bids import (
     write_meg_crosstalk,
     write_raw_bids,
 )
-from mne_bids.config import ALLOWED_PATH_ENTITIES_SHORT
+from mne_bids.config import ALLOWED_DATATYPES, ALLOWED_PATH_ENTITIES_SHORT
 from mne_bids.path import (
     _DATATYPE_LIST,
     _filter_fnames,
@@ -910,6 +910,20 @@ def test_mri_datatypes(datatype, suffix):
     )
     assert bids_path.check
     assert str(bids_path) == f"sub-01/{datatype}/sub-01_{suffix}.nii.gz"
+    # BIDSPath accepts them, but they are not datatypes MNE-BIDS reads or writes
+    assert datatype not in ALLOWED_DATATYPES
+
+
+def test_mri_fpath(tmp_path):
+    """Test .fpath of an MRI suffix without extension looks at all extensions."""
+    pet_dir = tmp_path / "sub-01" / "pet"
+    pet_dir.mkdir(parents=True)
+    (pet_dir / "sub-01_pet.nii.gz").touch()
+    bids_path = BIDSPath(root=tmp_path, subject="01", datatype="pet", suffix="pet")
+    assert bids_path.fpath == pet_dir / "sub-01_pet.nii.gz"
+    (pet_dir / "sub-01_pet.json").touch()
+    with pytest.raises(RuntimeError, match="more than one matching data file"):
+        bids_path.fpath
 
 
 def test_unknown_entity_still_parsed():
@@ -1028,6 +1042,23 @@ def test_get_entities_from_fname_missing_separator(
     params = get_entities_from_fname(fname, on_error="ignore")
     assert params["task"] == expected_warn_task
     assert params[expected_other_key] is None
+
+
+@pytest.mark.parametrize(
+    "fname, expected",
+    [
+        # "dance" ends with the short key of ceagent, "ce", but is not split
+        ("sub-01_task-dance-1_eeg.set", {"task": "dance", "ceagent": None}),
+        # and "ce" does not make the split of "xspace" ambiguous
+        ("sub-01_task-xspace-MNI_eeg.set", {"task": "x", "space": "MNI"}),
+    ],
+)
+def test_get_entities_from_fname_autofix_short_keys(fname, expected):
+    """Test autofix does not split segments at the short schema keys."""
+    with pytest.warns(RuntimeWarning, match="missing underscore separator"):
+        params = get_entities_from_fname(fname, on_error="autofix")
+    for key, val in expected.items():
+        assert params[key] == val
 
 
 def test_get_entities_from_fname_missing_separator_three_entities():

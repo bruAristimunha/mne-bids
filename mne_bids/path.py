@@ -24,6 +24,7 @@ import numpy as np
 from mne.utils import _check_fname, _validate_type, logger, verbose
 
 from mne_bids._fileio import _open_lock
+from mne_bids._schema import DATATYPES
 from mne_bids.config import (
     ALLOWED_DATATYPE_EXTENSIONS,
     ALLOWED_DATATYPES,
@@ -1163,11 +1164,10 @@ class BIDSPath:
                 continue
 
             if key == "datatype":
-                if val is not None and val not in ALLOWED_DATATYPES and self.check:
+                # any BIDS datatype, not only those MNE-BIDS reads and writes
+                if val is not None and val not in DATATYPES and self.check:
                     raise ValueError(
-                        f"datatype ({val}) is not valid. "
-                        f"Should be one of "
-                        f"{ALLOWED_DATATYPES}"
+                        f"datatype ({val}) is not valid. Should be one of {DATATYPES}"
                     )
                 else:
                     continue
@@ -1914,6 +1914,25 @@ def _parse_bids_fname(fpath, assume_exists=False):
     )
 
 
+# The keys ``get_entities_from_fname`` uses to split a segment that misses a
+# separator ("task-ECONrun-1"): the entities MNE-BIDS had before it took all
+# entities from the BIDS schema, whose short keys such as "ce" or "rec" end
+# ordinary words ("dance", "xspace")
+_SEGMENT_FIX_KEYS = (
+    "sub",
+    "ses",
+    "task",
+    "tracksys",
+    "acq",
+    "run",
+    "proc",
+    "space",
+    "recording",
+    "split",
+    "desc",
+)
+
+
 def _suggest_fix_for_segment(segment, known_keys):
     """Decompose a multi-hyphen segment into valid BIDS key-value pairs.
 
@@ -2025,7 +2044,7 @@ def get_entities_from_fname(fname, on_error="raise", *, verbose=None):
                 fixed_segments.append(segment)
                 continue
 
-            fix = _suggest_fix_for_segment(segment, fname_vals)
+            fix = _suggest_fix_for_segment(segment, _SEGMENT_FIX_KEYS)
             msg = (
                 f'Found segment "{segment}" with multiple hyphens '
                 f'in filename "{fname}". This likely indicates a '
