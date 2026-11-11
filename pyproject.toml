@@ -19,7 +19,7 @@ classifiers = [
   "Topic :: Scientific/Engineering",
   "Topic :: Software Development",
 ]
-dependencies = ["mne>=1.8", "numpy>=1.23", "scipy>=1.9"]
+dependencies = ["bidsschematools>=1.2", "mne>=1.8", "numpy>=1.23", "scipy>=1.9"]
 description = "MNE-BIDS: Organizing MEG, EEG, and iEEG data according to the BIDS specification and facilitating their analysis with MNE-Python"
 dynamic = ["version"]
 keywords = [
@@ -104,7 +104,6 @@ exclude = [
   "/examples",
   "/Makefile",
   "/paper",
-  "/tools",
 ]
 
 [tool.hatch.metadata]

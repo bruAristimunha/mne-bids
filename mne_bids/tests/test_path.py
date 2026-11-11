@@ -17,6 +17,7 @@ from pathlib import Path, PurePath
 
 import mne
 import pytest
+from bidsschematools.schema import load_schema
 from mne.datasets import testing
 from mne.io import anonymize_info, read_raw_fif
 from test_read import _read_raw_fif, warning_str
@@ -936,13 +937,13 @@ def test_unknown_entity_still_parsed():
 
 def test_entity_order():
     """Test entities follow the schema order, except split before desc."""
-    from mne_bids._schema import ENTITIES as SCHEMA_ENTITIES
-
+    schema = load_schema()
+    schema_order = [schema.objects.entities[key].name for key in schema.rules.entities]
     long_names = list(ALLOWED_PATH_ENTITIES_SHORT.values())
     # MNE's split_naming="bids" puts _split-XX right before the suffix, so split
     # stays last before desc, as it was before the schema entities were added
     assert [key for key in ALLOWED_PATH_ENTITIES_SHORT if key != "split"] == [
-        key for key in SCHEMA_ENTITIES if key != "split"
+        key for key in schema_order if key != "split"
     ]
     assert long_names[-2:] == ["split", "description"]
     # the entities MNE-BIDS had before keep their relative order, so every

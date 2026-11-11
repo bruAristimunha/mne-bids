@@ -24,8 +24,8 @@ import numpy as np
 from mne.utils import _check_fname, _validate_type, logger, verbose
 
 from mne_bids._fileio import _open_lock
-from mne_bids._schema import DATATYPES
 from mne_bids.config import (
+    _BIDS_DATATYPES,
     ALLOWED_DATATYPE_EXTENSIONS,
     ALLOWED_DATATYPES,
     ALLOWED_FILENAME_EXTENSIONS,
@@ -1165,9 +1165,15 @@ class BIDSPath:
 
             if key == "datatype":
                 # any BIDS datatype, not only those MNE-BIDS reads and writes
-                if val is not None and val not in DATATYPES and self.check:
+                if (
+                    val is not None
+                    and val not in ALLOWED_DATATYPES
+                    and val not in _BIDS_DATATYPES
+                    and self.check
+                ):
                     raise ValueError(
-                        f"datatype ({val}) is not valid. Should be one of {DATATYPES}"
+                        f"datatype ({val}) is not valid. "
+                        f"Should be one of {_BIDS_DATATYPES}"
                     )
                 else:
                     continue

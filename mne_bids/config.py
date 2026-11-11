@@ -5,9 +5,11 @@
 
 import functools
 
+from bidsschematools.schema import load_schema
 from mne.io.constants import FIFF
 
-from mne_bids._schema import ENTITIES, ENTITY_FORMATS, RAW_SUFFIXES
+# the BIDS schema bundled with bidsschematools
+_SCHEMA = load_schema()
 
 BIDS_VERSION = "1.9.0"
 
@@ -20,6 +22,8 @@ DOI = """https://doi.org/10.21105/joss.01896"""
 EPHY_ALLOWED_DATATYPES = ["eeg", "emg", "ieeg", "meg", "nirs"]
 
 ALLOWED_DATATYPES = EPHY_ALLOWED_DATATYPES + ["anat", "beh", "motion"]
+# every BIDS datatype, which BIDSPath accepts although MNE-BIDS cannot read most
+_BIDS_DATATYPES = sorted(dt.value for dt in _SCHEMA.objects.datatypes.values())
 
 MEG_CONVERT_FORMATS = ["FIF", "auto"]
 EEG_CONVERT_FORMATS = ["BrainVision", "EDF", "BDF", "EEGLAB", "auto"]
@@ -358,9 +362,15 @@ ALLOWED_FILENAME_SUFFIX = [
     "stim",
     "motion",
 ]
-ALLOWED_FILENAME_SUFFIX += [
-    suffix for suffix in RAW_SUFFIXES if suffix not in ALLOWED_FILENAME_SUFFIX
-]
+# and the suffixes of the raw (not derived) files of the BIDS schema
+ALLOWED_FILENAME_SUFFIX += sorted(
+    {
+        suffix
+        for group in _SCHEMA.rules.files.raw.values()
+        for rule in group.values()
+        for suffix in rule.suffixes
+    }.difference(ALLOWED_FILENAME_SUFFIX)
+)
 
 # converts suffix to known path modalities
 SUFFIX_TO_DATATYPE = {
@@ -387,8 +397,15 @@ ALLOWED_FILENAME_EXTENSIONS = (
 # allowed BIDSPath entities: short name -> long name, in filename order. That is
 # the schema order, except that split comes right before desc as MNE's
 # split_naming="bids" puts it before the suffix, and tracksys keeps its long name
+_SCHEMA_ENTITIES = {
+    key: _SCHEMA.objects.entities[key] for key in _SCHEMA.rules.entities
+}
 ALLOWED_PATH_ENTITIES_SHORT = {
-    **{key: val for key, val in ENTITIES.items() if key not in ("split", "desc")},
+    **{
+        entity.name: key
+        for key, entity in _SCHEMA_ENTITIES.items()
+        if entity.name not in ("split", "desc")
+    },
     "tracksys": "tracking_system",
     "split": "split",
     "desc": "description",
@@ -487,7 +504,10 @@ ALLOWED_SPACES["motion"] = None
 
 # See: https://bids-specification.readthedocs.io/en/latest/appendices/entity-table.html#encephalography-eeg-ieeg-and-meg  # noqa: E501
 ENTITY_VALUE_TYPE = {
-    **{ALLOWED_PATH_ENTITIES_SHORT[key]: val for key, val in ENTITY_FORMATS.items()},
+    **{
+        ALLOWED_PATH_ENTITIES_SHORT[entity.name]: entity.format
+        for entity in _SCHEMA_ENTITIES.values()
+    },
     "suffix": "label",
     "extension": "label",
 }
