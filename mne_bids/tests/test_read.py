@@ -187,7 +187,6 @@ def test_nwb_requires_supported_mne(tmp_path, monkeypatch):
 def test_read_raw_bids_nwb(tmp_path):
     """Read NWB samples and apply the BIDS sidecars."""
     pynwb = pytest.importorskip("pynwb", minversion="4.2")
-    from pynwb.ecephys import ElectricalSeries
 
     bp = BIDSPath(
         subject="01",
@@ -202,16 +201,11 @@ def test_read_raw_bids_nwb(tmp_path):
     nwb = pynwb.NWBFile(
         "Synthetic session", "synthetic", datetime(2020, 1, 1, tzinfo=UTC)
     )
-    device = nwb.create_device(name="recorder")
-    group = nwb.create_electrode_group("grid", "grid", "cortex", device)
-    for electrode_id in [10, 20]:
-        nwb.add_electrode(id=electrode_id, location="cortex", group=group)
-    electrodes = nwb.create_electrode_table_region([0, 1], "all electrodes")
     nwb.add_acquisition(
-        ElectricalSeries(
+        pynwb.TimeSeries(
             name="signal",
             data=data,
-            electrodes=electrodes,
+            unit="volts",
             conversion=1e-6,
             rate=100.0,
             starting_time=0.0,
