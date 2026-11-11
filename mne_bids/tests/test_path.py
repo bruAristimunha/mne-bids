@@ -1055,11 +1055,13 @@ def test_find_best_candidates(candidate_list, best_candidates):
     assert _find_best_candidates(params, candidate_list) == best_candidates
 
 
-def test_find_inherited_sidecars(tmp_path, monkeypatch):
+@pytest.mark.parametrize("root_name", ["ds", "study[1]"])  # "[1]" is glob syntax
+def test_find_inherited_sidecars(tmp_path, monkeypatch, root_name):
     """Find the sidecars that apply to a recording, from the root down."""
-    root_json = tmp_path / "task-rest_eeg.json"
-    acq_json = tmp_path / "task-rest_acq-x_eeg.json"  # acq-x is not in the recording
-    subject_json = tmp_path / "sub-01" / "eeg" / "sub-01_task-rest_eeg.json"
+    root = tmp_path / root_name
+    root_json = root / "task-rest_eeg.json"
+    acq_json = root / "task-rest_acq-x_eeg.json"  # acq-x is not in the recording
+    subject_json = root / "sub-01" / "eeg" / "sub-01_task-rest_eeg.json"
     subject_json.parent.mkdir(parents=True)
     for fname in (root_json, acq_json, subject_json):
         fname.write_text("{}")
@@ -1069,17 +1071,19 @@ def test_find_inherited_sidecars(tmp_path, monkeypatch):
         datatype="eeg",
         suffix="eeg",
         extension=".edf",
-        root=tmp_path,
+        root=root,
     )
     expected = [root_json, subject_json]
     assert find_inherited_sidecars(bids_path) == expected
+    with _share_dir_listings():  # as in read_raw_bids
+        assert find_inherited_sidecars(bids_path) == expected
     candidates = [str(fname) for fname in (subject_json, acq_json, root_json)]
     assert find_inherited_sidecars(bids_path, candidates=candidates) == expected
     # a relative root, with directory listings shared as in read_raw_bids
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(root)
     with _share_dir_listings():
         relative = find_inherited_sidecars(bids_path.copy().update(root="."))
-    assert relative == [fname.relative_to(tmp_path) for fname in expected]
+    assert relative == [fname.relative_to(root) for fname in expected]
 
 
 def test_find_matching_sidecar_basic(bids_root, tmp_path, path_counter, fast_sidecar):

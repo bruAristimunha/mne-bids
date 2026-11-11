@@ -2199,7 +2199,9 @@ def find_inherited_sidecars(
         candidates = [
             fname
             for level in levels
-            for fname in _sidecar_glob(str(level / f"*{name}"))
+            for fname in _sidecar_glob(
+                os.path.join(glob.escape(str(level)), f"*{name}")
+            )
         ]
 
     sidecars = []
@@ -2261,7 +2263,7 @@ def _sidecar_is_file(path, bids_root):
 def _sidecar_glob(search_str):
     """Like ``glob.iglob(search_str)``, answered from a shared listing if any."""
     dir_, pattern = os.path.split(search_str)
-    entries = None if glob.has_magic(dir_) else _listed(dir_ or os.curdir)
+    entries = None if glob.has_magic(dir_) else _listed(dir_)
     if entries is None:
         return glob.iglob(search_str)
     return [os.path.join(dir_, name) for name in fnmatch.filter(entries, pattern)]

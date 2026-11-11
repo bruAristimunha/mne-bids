@@ -2667,9 +2667,10 @@ def test_read_raw_bids_non_object_json_sidecar(tmp_path, suffix):
     assert len(raw.annotations) > 0
 
 
-def test_read_raw_bids_inherited_sidecar(tmp_path):
+@pytest.mark.parametrize("root_name", ["tiny_bids", "tiny_bids[1]"])
+def test_read_raw_bids_inherited_sidecar(tmp_path, root_name):
     """A key only in a root-level sidecar is inherited by the recording."""
-    bids_root = tmp_path / "tiny_bids"
+    bids_root = tmp_path / root_name  # "[1]" is glob syntax
     sh.copytree(tiny_bids_root, bids_root)
     _write_json(bids_root / "task-rest_eeg.json", {"PowerLineFrequency": 60})
     eeg_json = (
