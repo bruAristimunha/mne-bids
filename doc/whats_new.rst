@@ -37,6 +37,7 @@ Detailed list of changes
 - Add :func:`mne_bids.open_lock`, the cross-process file lock mne-bids uses for shared files such as ``participants.tsv``, so downstream writers can share it, by `Bruno Aristimunha`_ (:gh:`1675`)
 - :func:`mne_bids.read_epochs_bids` now reads epoched FIF files (``RecordingType: "epoched"``) with :func:`mne.read_epochs`, and :func:`mne_bids.read_raw_bids` points to it for such files, by `Hamza Abdelhedi`_ (:gh:`1679`)
 - :func:`mne_bids.read_raw_bids` now accepts path-like inputs (``str`` or :class:`pathlib.Path`), converting them via :func:`mne_bids.get_bids_path_from_fname`, by `Bruno Aristimunha`_ (:gh:`1695`)
+- :func:`mne_bids.read_raw_bids` now merges every JSON sidecar of the recording's suffix that applies under the BIDS inheritance principle, from the dataset root down, so keys found only in a higher-level sidecar are no longer lost; the new :func:`mne_bids.find_inherited_sidecars` lists these files, by `Bruno Aristimunha`_
 
 🧐 API and behavior changes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^

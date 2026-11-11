@@ -2148,6 +2148,73 @@ def _find_matching_sidecar(bids_path, suffix=None, extension=None, on_error="rai
     return None
 
 
+def find_inherited_sidecars(
+    bids_path, *, suffix=None, extension=".json", candidates=None
+):
+    """Find all sidecar files that apply to a recording.
+
+    Under the BIDS `inheritance principle
+    <https://bids-specification.readthedocs.io/en/stable/common-principles.html#the-inheritance-principle>`__,
+    a sidecar file applies to a recording if it has the same suffix and
+    extension, every entity in its filename is in the recording's filename with
+    the same value, and it is stored in the recording's directory or in one
+    above it, up to the dataset root. Merging JSON sidecars in the returned
+    order lets the values of lower files override those of higher ones.
+
+    Parameters
+    ----------
+    bids_path : BIDSPath
+        The recording. Its ``root`` must be set.
+    suffix : str | None
+        The suffix of the sidecar files, e.g. ``'eeg'``. If ``None``, use
+        ``bids_path.suffix``.
+    extension : str
+        The extension of the sidecar files.
+    candidates : iterable of path-like | None
+        The files to choose from, e.g. the files of an already listed dataset,
+        given under ``bids_path.root`` as it is spelled there. If ``None``,
+        search the directories.
+
+    Returns
+    -------
+    sidecars : list of Path
+        The sidecar files that apply, ordered from the dataset root down. BIDS
+        allows one per directory; if a directory has more, those with fewer
+        entities come first.
+
+    Notes
+    -----
+    .. versionadded:: 0.21
+    """
+    if bids_path.root is None:
+        raise ValueError(
+            "The root of the BIDSPath must be set to find inherited sidecar files."
+        )
+    root = Path(bids_path.root)
+    levels = [root]
+    for part in bids_path.directory.relative_to(root).parts:
+        levels.append(levels[-1] / part)
+    name = f"{suffix or bids_path.suffix}{extension}"
+    if candidates is None:
+        candidates = [
+            fname
+            for level in levels
+            for fname in _sidecar_glob(str(level / f"*{name}"))
+        ]
+
+    sidecars = []
+    for fname in map(Path, candidates):
+        if fname.parent not in levels:
+            continue
+        if fname.name != name and not fname.name.endswith(f"_{name}"):
+            continue
+        entities = get_entities_from_fname(fname, on_error="ignore")
+        entities = {key: val for key, val in entities.items() if val is not None}
+        if entities.items() <= bids_path.entities.items():
+            sidecars.append((levels.index(fname.parent), len(entities), fname))
+    return [fname for *_, fname in sorted(sidecars)]
+
+
 _ext_map = {  # these sidecar files should only ever have these extensions
     "scans": ".tsv",
     "coordsystem": ".json",
@@ -2194,7 +2261,7 @@ def _sidecar_is_file(path, bids_root):
 def _sidecar_glob(search_str):
     """Like ``glob.iglob(search_str)``, answered from a shared listing if any."""
     dir_, pattern = os.path.split(search_str)
-    entries = None if glob.has_magic(dir_) else _listed(dir_)
+    entries = None if glob.has_magic(dir_) else _listed(dir_ or os.curdir)
     if entries is None:
         return glob.iglob(search_str)
     return [os.path.join(dir_, name) for name in fnmatch.filter(entries, pattern)]

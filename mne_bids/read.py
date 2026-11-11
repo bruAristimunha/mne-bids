@@ -35,6 +35,7 @@ from mne_bids.path import (
     _infer_datatype,
     _parse_ext,
     _share_dir_listings,
+    find_inherited_sidecars,
     get_bids_path_from_fname,
 )
 from mne_bids.tsv_handler import _drop, _from_tsv
@@ -513,12 +514,15 @@ def _read_json_object(fname):
     return content
 
 
-def _handle_info_reading(sidecar_fname, raw):
-    """Read associated sidecar JSON and populate raw.
+def _handle_info_reading(sidecar_fnames, raw):
+    """Read associated sidecar JSONs and populate raw.
 
+    The sidecars are merged in order, so later files override earlier ones.
     Handle PowerLineFrequency of recording.
     """
-    sidecar_json = _read_json_object(sidecar_fname)
+    sidecar_json = dict()
+    for sidecar_fname in sidecar_fnames:
+        sidecar_json.update(_read_json_object(sidecar_fname))
 
     # read in the sidecar JSON's and raw object's line frequency
     json_linefreq = sidecar_json.get("PowerLineFrequency")
@@ -586,8 +590,9 @@ def _handle_info_reading(sidecar_fname, raw):
                 # XXX: Set chpi info in mne.Raw to what is in the sidecar
                 if not np.allclose(hpi_freqs_json, hpi_freqs_raw):
                     warn(
-                        f"The cHPI coil frequencies in the sidecar file "
-                        f"{sidecar_fname}:\n    {hpi_freqs_json}\n "
+                        f"The cHPI coil frequencies in the sidecar files "
+                        f"{', '.join(map(str, sidecar_fnames))}:\n"
+                        f"    {hpi_freqs_json}\n "
                         f"differ from what is stored in the raw data:\n"
                         f"    {hpi_freqs_raw}.\n"
                         f"Defaulting to the info from mne.Raw object."
@@ -1553,13 +1558,13 @@ def _attach_sidecars(raw, bids_path, *, on_ch_mismatch):
                     datatype=datatype,
                 )
 
-    # Try to find an associated sidecar .json to get information about the
-    # recording snapshot
-    sidecar_fname = _find_matching_sidecar(
-        bids_path, suffix=datatype, extension=".json", on_error="warn"
-    )
-    if sidecar_fname is not None:
-        raw = _handle_info_reading(sidecar_fname, raw)
+    # Merge the sidecar .json files that apply to the recording, from the
+    # dataset root down, to get information about the recording snapshot
+    sidecar_fnames = find_inherited_sidecars(bids_path, suffix=datatype)
+    if sidecar_fnames:
+        raw = _handle_info_reading(sidecar_fnames, raw)
+    else:
+        warn(f"Did not find any {datatype}.json associated with {bids_path.basename}.")
 
     # read in associated scans filename
     scans_fname = BIDSPath(
