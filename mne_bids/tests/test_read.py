@@ -186,7 +186,7 @@ def test_nwb_requires_supported_mne(tmp_path, monkeypatch):
 )
 def test_read_raw_bids_nwb(tmp_path):
     """Read NWB samples and apply the BIDS sidecars."""
-    pynwb = pytest.importorskip("pynwb", minversion="4.2")
+    pynwb = pytest.importorskip("pynwb")
 
     bp = BIDSPath(
         subject="01",
