@@ -32,6 +32,8 @@ Detailed list of changes
 🚀 Enhancements
 ^^^^^^^^^^^^^^^
 
+- Read NWB recordings with :func:`read_raw_bids` when MNE-Python provides ``read_raw_nwb``, preserving invalid-recording intervals when BIDS events are applied, by `Bruno Aristimunha`_.
+
 - Expose MRI defacing function to public API as :func:`mne_bids.deface_mri` by `Erica Peterson`_ (:gh:`1544`)
 - Add an ``extra_fields`` parameter to :func:`make_dataset_description` to write additional top-level keys to ``dataset_description.json``, by `Bruno Aristimunha`_ (:gh:`1674`)
 - Add :func:`mne_bids.open_lock`, the cross-process file lock mne-bids uses for shared files such as ``participants.tsv``, so downstream writers can share it, by `Bruno Aristimunha`_ (:gh:`1675`)
