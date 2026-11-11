@@ -2874,7 +2874,7 @@ def _literal_suffix(pattern):
 
 
 def _filter_fnames(fnames, *, suffix=None, extension=None, **entities):
-    """Filter a list of BIDS filenames / paths based on BIDS entity values.
+    r"""Filter a list of BIDS filenames / paths based on BIDS entity values.
 
     Input can be str or list of str.
 
@@ -2882,7 +2882,8 @@ def _filter_fnames(fnames, *, suffix=None, extension=None, **entities):
     ----------
     fnames : iterable of pathlib.Path | iterable of str
         The names to filter. A chained fsspec URL (``"<url>::<url>"``) is
-        matched by its part before ``"::"``.
+        matched by its first ``"::"``-separated part that contains a ``/`` or
+        a ``\``, or as a whole if no part does.
     suffix, extension, **entities : str | iterable of str | None
         The values to keep, by long entity name (e.g., ``subject``).
 
@@ -2916,12 +2917,15 @@ def _filter_fnames(fnames, *, suffix=None, extension=None, **entities):
 
     regexp = leading_path_str + entities_str + suffix_str + ext_str
 
-    # Match a chained fsspec URL by its first part with a "/", which is the inner
-    # path of ``zip://sub-01/...::/tmp/x.zip`` and the URL of
+    # Match a chained fsspec URL by its first part with a "/" (or "\" on Windows),
+    # which is the inner path of ``zip://sub-01/...::/tmp/x.zip`` and the URL of
     # ``simplecache::s3://bucket/sub-01/...``, but return every name as given.
     names = [
         (
-            next((part for part in str(fname).split("::") if "/" in part), str(fname)),
+            next(
+                (p for p in str(fname).split("::") if "/" in p or "\\" in p),
+                str(fname),
+            ),
             fname,
         )
         for fname in fnames

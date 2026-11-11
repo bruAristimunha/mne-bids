@@ -13,7 +13,7 @@ import shutil as sh
 import timeit
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path, PurePath
+from pathlib import Path, PurePath, PureWindowsPath
 
 import mne
 import pytest
@@ -1851,7 +1851,7 @@ def test_filter_fnames_mri():
 
 
 @pytest.mark.parametrize("extension", [None, ".edf"])
-@pytest.mark.parametrize("cls", [str, Path])
+@pytest.mark.parametrize("cls", [str, Path, PureWindowsPath])
 @pytest.mark.parametrize(
     "url",
     [
