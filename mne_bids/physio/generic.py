@@ -1,11 +1,12 @@
 """Utilities for reading 'generic' physiological BIDS data."""
 
+import gzip
 import json
 from pathlib import Path
 from warnings import warn
 
 import numpy as np
-from mne.utils import _validate_type
+from mne.utils import _check_option, _validate_type
 
 
 def _get_physio_type(physio_json_fpath):
@@ -52,22 +53,25 @@ def _read_physioevents(bids_path, ch_names="auto"):
     annot_kwargs : dict of ndarray
         Keyword arguments suitable for ``mne.Annotations(**annot_kwargs)``.
     """
-    from mne_bids.read import events_file_to_annotation_kwargs
+    from mne_bids.read import _make_annotation_kwargs
+    from mne_bids.tsv_handler import _from_tsv
 
     encoding = "utf-8-sig"
 
     _validate_type(ch_names, (list, tuple, str, type(None)), item_name="ch_names")
+    physio_json_fpath = bids_path.find_matching_sidecar(
+        suffix="physio", extension=".json"
+    )
+    physio_sidecar = _read_json(physio_json_fpath)
 
     # Make annotations channel-agnostic
     if ch_names is None:
         ch_names = tuple()
     # Pull names from TSV file. Assumes MNE ch_names are identical to these column names
     elif ch_names == "auto":
-        physio_json_fpath = bids_path.find_matching_sidecar(
-            suffix="physio", extension=".json"
+        ch_names = tuple(
+            name for name in physio_sidecar["Columns"] if name != "timestamp"
         )
-        physio_sidecar = json.loads(physio_json_fpath.read_text(encoding=encoding))
-        ch_names = tuple(physio_sidecar.get("Columns", []))
     # MNE channel names were passed in from the call site
     else:
         ch_names = tuple(ch_names)
@@ -77,13 +81,45 @@ def _read_physioevents(bids_path, ch_names="auto"):
         extension=".tsv.gz",
     )
 
-    annot_kwargs = events_file_to_annotation_kwargs(events_fname)
+    events = _from_tsv(events_fname)
+    events.setdefault("duration", ["0"] * len(events["onset"]))
+    annot_kwargs, _ = _make_annotation_kwargs(events, events_fname)
+    events_json = _read_json(events_fname.with_suffix("").with_suffix(".json"))
+    source = events_json["OnsetSource"]
+    if source == "n/a":
+        annot_kwargs["onset"] /= physio_sidecar["SamplingFrequency"]
+    else:
+        columns = physio_sidecar["Columns"]
+        _check_option("OnsetSource", source, columns)
+        unit = physio_sidecar.get(source, {}).get("Units")
+        scales = {"s": 1, "ms": 1e-3, "us": 1e-6, "µs": 1e-6, "ns": 1e-9}
+        if unit is None:
+            from scipy.interpolate import interp1d
+
+            timestamps = np.asarray(_from_tsv(bids_path.fpath, dtypes=float)[source])
+            if (
+                len(timestamps) < 2
+                or not np.isfinite(timestamps).all()
+                or np.any(np.diff(timestamps) <= 0)
+            ):
+                raise ValueError("OnsetSource must increase between samples.")
+            to_seconds = interp1d(
+                timestamps,
+                np.arange(len(timestamps)) / physio_sidecar["SamplingFrequency"],
+                bounds_error=False,
+                fill_value="extrapolate",
+                assume_sorted=True,
+            )
+            annot_kwargs["onset"] = to_seconds(annot_kwargs["onset"])
+        else:
+            _check_option("OnsetSource units", unit, scales)
+            with gzip.open(bids_path.fpath, "rt", encoding=encoding) as fid:
+                first = float(fid.readline().split("\t")[columns.index(source)])
+            annot_kwargs["onset"] = (annot_kwargs["onset"] - first) * scales[unit]
     n_annots = len(annot_kwargs["onset"])
-    if ch_names:
-        # This is the best way I could work out to create a 1D array of tuples
-        tuples = [ch_names] * n_annots
-        arr = np.empty(len(tuples), dtype=object)
-        arr[:] = tuples
-        annot_kwargs["ch_names"] = arr
+    tuples = [ch_names] * n_annots
+    arr = np.empty(n_annots, dtype=object)
+    arr[:] = tuples
+    annot_kwargs["ch_names"] = arr
 
     return annot_kwargs
