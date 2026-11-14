@@ -1848,9 +1848,14 @@ def test_write_read_fif_split_file(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="Split files must have the same acq_time."):
         read_raw_bids(bids_path)
 
-    # reset scans.tsv file for downstream tests
-    scan_data["acq_time"][0] = scan_data["acq_time"][1]
-    _to_tsv(scan_data, scans_tsv)
+    # missing continuation split warns by default unless overridden
+    bids_path.fpath.unlink()
+    scans_tsv.fpath.unlink()
+    split1 = bids_path.update(split="01")
+    with pytest.warns(RuntimeWarning, match="Split raw file detected"):
+        assert len(read_raw_bids(split1)) < len(raw)
+    with pytest.raises(ValueError, match="Split raw file"):
+        read_raw_bids(split1, extra_params={"on_split_missing": "raise"})
 
 
 @pytest.mark.filterwarnings(warning_str["channel_unit_changed"])
