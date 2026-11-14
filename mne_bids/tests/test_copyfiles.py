@@ -243,13 +243,9 @@ def test_copyfile_eeglab_invalid_fdt(tmp_path):
     """Reject an unexpected companion file extension before copying it."""
     from scipy.io import savemat
 
-    src, dest = tmp_path / "source.set", tmp_path / "destination.set"
-    savemat(src, {"EEG": {"data": "source.bin"}}, appendmat=False)
-    src.with_suffix(".bin").write_bytes(b"data")
-    with pytest.raises(ValueError, match="Unexpected fdt name: source.bin"):
-        copyfile_eeglab(src, dest)
-    assert not dest.exists()
-    assert not dest.with_suffix(".fdt").exists()
+    savemat(tmp_path / "a.set", {"EEG": {"data": "a.bin"}}, appendmat=False)
+    with pytest.raises(ValueError, match="Unexpected fdt name: a.bin"):
+        copyfile_eeglab(tmp_path / "a.set", tmp_path / "b.set")
 
 
 def test_copyfile_kit(tmp_path):

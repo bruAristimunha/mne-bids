@@ -55,7 +55,7 @@ Detailed list of changes
 🪲 Bug fixes
 ^^^^^^^^^^^^
 
-- Reject unexpected EEGLAB companion file extensions with a ``ValueError`` instead of an assertion, so validation is retained when Python runs with optimization enabled, by `Bruno Aristimunha`_.
+- Reject unexpected EEGLAB companion file extensions with a ``ValueError`` instead of an assertion, so validation is retained when Python runs with optimization enabled, by `Bruno Aristimunha`_ (:gh:`1710`)
 - :func:`mne_bids.read_raw_bids` no longer fails with an ``AttributeError`` when an ``events.json`` sidecar is not a JSON object (for example ``[]``), by `Bruno Aristimunha`_ (:gh:`1703`)
 - Fix readers seeing a partially written sidecar while another process was rewriting it, by `Hamza Abdelhedi`_ (:gh:`1680`)
 - Fix parallel :func:`mne_bids.write_raw_bids` calls for BTi/4D data overwriting each other's ``.bidsignore`` changes, by `Hamza Abdelhedi`_ (:gh:`1680`)
