@@ -137,9 +137,10 @@ def test_contains_row_different_types():
         ("name\tunit\nEEG\tµV\n".encode(), "utf-8"),
         (codecs.BOM_UTF8 + b"name\tunit\nEEG\tuV\n", "utf-8-sig"),
         ("name\tunit\nEEG\tµV\n".encode("utf-16"), "utf-16"),
-        (b"name\tunit\nEEG\t\xb5V\n", "latin-1"),
+        (b"name\tunit\nEEG\t\xb5V\n", "cp1252"),
+        (b"name\tunit\nEEG\t\x81\n", "latin-1"),
     ],
-    ids=["ascii", "utf8", "utf8-bom", "utf16", "latin1"],
+    ids=["ascii", "utf8", "utf8-bom", "utf16", "cp1252", "latin1"],
 )
 def test_detect_file_encoding(tmp_path, payload, expected):
     """Encoding is detected deterministically from BOM and UTF-8 validity."""
@@ -151,10 +152,10 @@ def test_detect_file_encoding(tmp_path, payload, expected):
 def test_from_tsv_latin1_logs_info(tmp_path):
     """``_from_tsv`` reads non-UTF-8 TSV files and emits a soft info message."""
     tsv = tmp_path / "channels.tsv"
-    tsv.write_bytes(b"name\tunit\nEEG\t\xb5V\n")  # 'µV' in latin-1
+    tsv.write_bytes(b"name\tunit\n" + b"A\tuV\n" * 14000 + b"EEG\t\x96V\n")
     with catch_logging(verbose="info") as log:
         d = _from_tsv(tsv)
-    assert d["unit"] == ["µV"]
+    assert d["unit"][-1] == "–V"
     assert "non-UTF-8" in log.getvalue()
 
 

@@ -810,6 +810,10 @@ def _make_annotation_kwargs(events_dict, events_fname=None):
         [0 if du == "n/a" else du for du in events_dict["duration"]], dtype=float
     )
 
+    if (durs < 0).any():
+        warn("Events contain negative durations; setting them to zero.")
+        durs = np.maximum(durs, 0)
+
     extras = None
     extra_columns = list(
         set(events_dict)
@@ -825,7 +829,16 @@ def _make_annotation_kwargs(events_dict, events_fname=None):
     )
     if extra_columns:
         # infer types (int, float or str)
-        for col in extra_columns:
+        for idx, col in enumerate(extra_columns):
+            original = col
+            while col in ("description", "ch_names", "hed_string") or (
+                col != original and col in events_dict
+            ):
+                col = f"events_{col}"
+            if col != original:
+                warn(f"Events column {original!r} is reserved; storing it as {col!r}.")
+                events_dict[col] = events_dict.pop(original)
+                extra_columns[idx] = col
             vals = [str(v) for v in events_dict[col]]
             try:
                 events_dict[col] = [int(v) for v in vals]

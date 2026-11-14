@@ -33,28 +33,23 @@ def _normalize_tsv_cell(value):
     return _DECIMAL_COMMA_RE.sub(r"\1.\2", stripped)
 
 
-def _detect_file_encoding(fname, chunk_size=65536, *, content=None):
-    """Detect the text encoding of a file from its first chunk.
-
-    Checks for a BOM and otherwise tests UTF-8 validity on a single chunk
-    (default 64 KiB), falling back to ``latin-1``. Avoids reading the full
-    file: enough to catch non-UTF-8 bytes in typical BIDS TSV files (e.g.
-    ``µV`` in ``channels.tsv``). ``content`` (bytes) is used instead of the file.
-    """
+def _detect_file_encoding(fname, *, content=None):
+    """Check BOMs and validate the entire file before choosing an encoding."""
     fname = Path(fname)
     opener = gzip.open if fname.suffix == ".gz" else open
     with opener(fname, "rb") if content is None else io.BytesIO(content) as f:
-        chunk = f.read(chunk_size)
-    if chunk.startswith(codecs.BOM_UTF8):
+        data = f.read()
+    if data.startswith(codecs.BOM_UTF8):
         return "utf-8-sig"
-    if chunk.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+    if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
         return "utf-16"
-    decoder = codecs.getincrementaldecoder("utf-8")()
-    try:
-        decoder.decode(chunk, final=False)
-        return "utf-8"
-    except UnicodeDecodeError:
-        return "latin-1"
+    for encoding in ("utf-8", "cp1252"):
+        try:
+            data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        return encoding
+    return "latin-1"
 
 
 def _combine_rows(data1, data2, drop_column=None):
