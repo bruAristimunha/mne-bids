@@ -41,6 +41,7 @@ from mne_bids.read import (
     _assemble_hed_from_sidecar,
     _handle_channels_reading,
     _handle_events_reading,
+    _handle_participants_reading,
     _handle_scans_reading,
     _read_hed_version,
     _read_raw,
@@ -437,6 +438,20 @@ def test_read_participants_data(tmp_path):
     os.utime(participants_tsv_fpath, ns=(stat.st_atime_ns, stat.st_mtime_ns))
     assert participants_tsv_fpath.stat().st_size == stat.st_size
     assert read_raw_bids(bids_path=bids_path).info["subject_info"]["sex"] == 1
+
+
+@pytest.mark.parametrize("age", ["24", "n/a", "nan", "inf", "2018"])
+def test_read_participants_age(tmp_path, age):
+    """Ignore ages that cannot give a birthday, keeping other subject fields."""
+    fname = tmp_path / "participants.tsv"
+    fname.write_text(f"participant_id\tage\tsex\thand\nsub-01\t{age}\tF\tR\n")
+    raw = mne.io.RawArray(np.zeros((1, 100)), mne.create_info(["A"], 100.0, "eeg"))
+    raw.set_meas_date(datetime(2019, 1, 1, tzinfo=UTC))
+    _handle_participants_reading(fname, raw, "sub-01")
+    expected = {"his_id": "sub-01", "sex": 2, "hand": 1}
+    if age == "24":
+        expected["birthday"] = date(1995, 1, 1)
+    assert raw.info["subject_info"] == expected
 
 
 @pytest.mark.parametrize(
